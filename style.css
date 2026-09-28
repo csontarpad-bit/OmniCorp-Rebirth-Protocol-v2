@@ -1,0 +1,705 @@
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+body { margin: 0; overflow: hidden; background: #000; touch-action: none; user-select: none; -webkit-user-select: none; font-family: 'Share Tech Mono', monospace; cursor: default; }
+
+button, select, input[type="button"], input[type="submit"], .cyber-btn, .diff-btn, .opt-tab-btn, .dir-tab-btn, .archive-tab-btn, .shop-tab-btn {
+    cursor: pointer;
+}
+
+/* ==========================================
+   TÖLTŐKÉPERNYŐ (Loading Screen)
+   ========================================== */
+#loading-screen {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    background-color: #000;
+    background-image: url('https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/00ad21b70dad334c3614f776895e17d20e34f833/Loading.jpeg');
+    background-size: cover; background-position: center;
+    display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+    z-index: 9999; /* Legfelül van minden felett */
+    transition: opacity 1.5s ease-in-out; /* Finom eltűnés */
+    padding-bottom: 10%;
+}
+
+.loading-content {
+    background: rgba(0, 20, 0, 0.8);
+    border: 2px solid #00ff00; border-radius: 10px;
+    padding: 20px 40px; text-align: center;
+    box-shadow: 0 0 30px rgba(0, 255, 0, 0.4), inset 0 0 20px #000;
+    backdrop-filter: blur(5px);
+}
+
+.loading-text { color: #00ff00; font-size: 24px; letter-spacing: 3px; text-shadow: 0 0 10px #00ff00; margin-bottom: 15px; }
+#loading-status { color: #88ff88; font-size: 14px; margin-top: 10px; font-family: monospace; }
+
+/* Radioaktív Kémcső */
+.radioactive-tube {
+    width: 300px; height: 30px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 3px solid rgba(255, 255, 255, 0.3); /* Üveg hatás */
+    border-radius: 15px;
+    box-shadow: inset 0 5px 10px rgba(0,0,0,0.8), 0 0 10px rgba(0, 255, 0, 0.2);
+    overflow: hidden; position: relative;
+    padding: 2px;
+}
+
+/* Folyadék benne */
+#radioactive-liquid {
+    height: 100%; width: 0%; /* Ezt animáljuk JS-ből */
+    background: linear-gradient(90deg, #005500 0%, #00ff00 50%, #aaffaa 100%);
+    border-radius: 10px;
+    box-shadow: 0 0 20px #00ff00, inset 0 0 10px #fff;
+    transition: width 0.3s ease-out;
+}
+/* Buborék effekt a folyadékban */
+#radioactive-liquid::after {
+    content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.2) 10px, rgba(255,255,255,0.2) 20px);
+    animation: moveBubbles 1s linear infinite;
+}
+@keyframes moveBubbles { 0% { background-position: 0 0; } 100% { background-position: 40px 0; } }
+
+/* ==========================================
+   ÉLŐ 3D FŐMENÜ KINÉZET
+   ========================================== */
+#main-menu {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: transparent; /* Átlátszó, hogy lássuk a 3D-t! */
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    z-index: 200;
+}
+
+.menu-box {
+    background: rgba(5, 15, 5, 0.85); border: 2px solid #00aa00; border-radius: 15px;
+    padding: 40px; text-align: center; box-shadow: 0 0 30px #00ff00, inset 0 0 50px #000;
+    backdrop-filter: blur(10px);
+}
+
+.menu-box h1 { font-size: 60px; color: #fff; text-shadow: 0 0 15px #00ff00; margin: 0 0 10px 0; line-height: 1.1; letter-spacing: 5px; }
+.menu-box h1 .highlight { color: #00ff00; font-size: 70px; }
+#high-score-display { color: #ffcc00; font-size: 24px; font-weight: bold; text-shadow: 0 0 10px #ffaa00; margin-bottom: 30px; }
+
+.menu-options { margin-bottom: 40px; color: #aaa; font-size: 18px; }
+.cyber-select {
+    font-family: 'Share Tech Mono', monospace; font-size: 18px; background: rgba(0, 30, 0, 0.8);
+    color: #00ff00; border: 1px solid #00ff00; padding: 10px; margin-left: 10px; cursor: pointer; outline: none;
+}
+
+.cyber-btn {
+    padding: 15px 40px; font-size: 24px; font-family: 'Share Tech Mono', monospace;
+    background: rgba(0, 50, 0, 0.8); color: #00ff00; border: 2px solid #00ff00;
+    border-radius: 5px; cursor: pointer; transition: 0.2s; text-transform: uppercase; letter-spacing: 2px;
+    box-shadow: 0 0 15px rgba(0, 255, 0, 0.2), inset 0 0 10px rgba(0, 255, 0, 0.2);
+}
+.cyber-btn:hover { background: #00ff00; color: #000; box-shadow: 0 0 30px #00ff00; transform: scale(1.05); }
+
+
+
+/* Játék UI */
+#ui-layer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; display: flex; z-index: 10; }
+
+#radar { 
+    position: absolute; top: 20px; left: 20px; width: 120px; height: 120px; 
+    border-radius: 50%; border: 2px solid rgba(0, 255, 0, 0.4); 
+    background: radial-gradient(circle, rgba(0, 40, 0, 0.5) 0%, rgba(0, 10, 0, 0.8) 100%);
+    backdrop-filter: blur(4px); 
+    box-shadow: 0 0 15px rgba(0, 255, 0, 0.2), inset 0 0 10px rgba(0, 255, 0, 0.2);
+    pointer-events: none; z-index: 20; overflow: hidden;
+}
+.radar-scanner {
+    position: absolute; top: 50%; left: 50%; width: 50%; height: 2px;
+    background: linear-gradient(90deg, rgba(0,255,0,0) 0%, rgba(0,255,0,0.8) 100%);
+    transform-origin: 0% 50%; z-index: 10;
+}
+.radar-blip { 
+    position: absolute; width: 8px; height: 8px; background-color: #ff2222; border-radius: 50%; 
+    transform: translate(-50%, -50%); box-shadow: 0 0 8px #ff0000; opacity: 0; transition: opacity 1.5s ease-out; z-index: 15;
+}
+.radar-blip.visible { opacity: 1; transition: none; }
+.radar-center { position: absolute; width: 4px; height: 4px; background-color: #00ff00; border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px #00ff00; z-index: 20; }
+
+#health-bar-container { 
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%); width: 300px; height: 20px; 
+    background: rgba(0, 0, 0, 0.7); border: 2px solid #444; border-radius: 3px; box-shadow: 0 4px 6px rgba(0,0,0,0.5); z-index: 20;
+}
+#health-bar-container::before { content: '🩸'; position: absolute; left: -35px; top: 50%; transform: translateY(-50%); font-size: 24px; filter: drop-shadow(0 0 5px rgba(255, 0, 0, 0.8)); }
+#health-fill { width: 100%; height: 100%; background-color: #00ff00; transition: width 0.2s ease-out, background-color 0.2s; box-shadow: 0 0 10px rgba(0, 255, 0, 0.5); }
+
+#score-display { position: absolute; top: 20px; right: 20px; color: #00ff00; font-size: 24px; text-shadow: 0 0 8px rgba(0, 255, 0, 0.6); z-index: 20; }
+#crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 20px; height: 20px; pointer-events: none; z-index: 20; }
+#crosshair::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 2px; background: rgba(0, 255, 0, 0.7); transform: translateY(-50%); box-shadow: 0 0 5px #00ff00; }
+#crosshair::after { content: ''; position: absolute; top: 0; left: 50%; width: 2px; height: 100%; background: rgba(0, 255, 0, 0.7); transform: translateX(-50%); box-shadow: 0 0 5px #00ff00; }
+.crosshair-center { position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; background: transparent; border: 2px solid #000; transform: translate(-50%, -50%); border-radius: 50%; z-index: 2; }
+#zone-left { position: absolute; bottom: 0; left: 0; width: 50vw; height: 100vh; pointer-events: auto; }
+#zone-right { position: absolute; top: 0; left: 50vw; width: 50vw; height: 100vh; pointer-events: auto; }
+#joy-base { position: absolute; width: 100px; height: 100px; border: 2px solid rgba(255,255,255,0.2); border-radius: 50%; background: rgba(255,255,255,0.05); transform: translate(-50%, -50%); pointer-events: none; z-index: 20; }
+#joy-stick { position: absolute; width: 40px; height: 40px; background: rgba(255,255,255,0.4); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 10px rgba(255,255,255,0.5); z-index: 20; }
+
+.hidden { display: none !important; }
+
+#damage-flash { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 0, 0, 0.3); pointer-events: none; opacity: 0; transition: opacity 0.1s; z-index: 5; }
+#heal-flash { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 255, 0, 0.2); pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 5; }
+#ammo-flash { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 204, 0, 0.25); pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 5; }
+
+#wave-display, #reload-text { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 36px; text-shadow: 0 0 15px #00aaff; z-index: 40; text-align: center; }
+#reload-text { color: #ff0000; text-shadow: 0 0 15px #ff0000; font-size: 28px; animation: blink 0.5s infinite; }
+@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+
+#weapon-canvas { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 300px; height: 200px; pointer-events: none; z-index: 15; }
+
+#game-over { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(20, 0, 0, 0.65); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; color: #ff0000; backdrop-filter: blur(3px); }
+#game-over h1 { font-size: 60px; margin: 0 0 20px 0; text-shadow: 0 0 20px #ff0000; }
+#game-over p { font-size: 24px; color: #fff; margin: 5px; }
+#restart-btn { margin-top: 30px; padding: 15px 40px; font-size: 24px; font-family: 'Share Tech Mono', monospace; background: #550000; color: #fff; border: 2px solid #ff0000; border-radius: 5px; cursor: pointer; transition: 0.2s; box-shadow: 0 0 15px rgba(255,0,0,0.5); pointer-events: auto; }
+#restart-btn:active { background: #ff0000; color: #000; }
+
+/* --- ÚJ: SISAKÜVEG/KAMERA VÉRFRÖCCSENÉS (VISOR SPLATTER) --- */
+#main-menu:not(.hidden) ~ * .visor-blood-splatter,
+#game-over:not(.hidden) ~ * .visor-blood-splatter,
+body:has(#main-menu:not(.hidden)) .visor-blood-splatter,
+body:has(#game-over:not(.hidden)) .visor-blood-splatter,
+body:has(#main-menu:not(.hidden)) #screen-blood,
+body:has(#game-over:not(.hidden)) #screen-blood {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+.visor-blood-splatter {
+    position: absolute;
+    background: rgba(85, 255, 85, 0.85); /* Sűrű toxikus zöld */
+    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; /* Csepp forma */
+    box-shadow: inset 0 -2px 4px rgba(0, 100, 0, 0.6), 0 0 8px rgba(85, 255, 85, 0.6);
+    pointer-events: none;
+    z-index: 45; /* A játék felett, de a UI (Célkereszt) alatt */
+    filter: blur(1.5px); /* Lencse fókusz effekt (nagyon fontos a 3D-s érzethez!) */
+    animation: dripDown 3s ease-in forwards;
+}
+
+/* A lefolyó csík (farok) a csepp UTÁN (FELFELÉ) */
+.visor-blood-splatter::after {
+    content: ''; 
+    position: absolute;
+    bottom: 50%; /* JAVÍTÁS: A csepp közepéből indul, és FELFELÉ nő! */
+    left: 25%; 
+    width: 50%;
+    /* JAVÍTÁS: Felfelé halványul! A cseppnél még sűrű, felül már átlátszó. */
+    background: linear-gradient(to top, rgba(85,255,85,0.85) 0%, rgba(85,255,85,0) 100%);
+    border-radius: 10px;
+    animation: dripTrail 3s ease-in forwards;
+}
+
+@keyframes dripDown {
+    0% { transform: scale(0) translateY(0); opacity: 0; }
+    5% { transform: scale(1.0) translateY(0); opacity: 1; }
+    70% { opacity: 0.8; }
+    100% { transform: scale(0.6) translateY(200px); opacity: 0; } /* Megindul lefelé */
+}
+
+@keyframes dripTrail {
+    0% { height: 0px; opacity: 0; }
+    5% { height: 0px; opacity: 1; }
+    100% { height: 150px; opacity: 0; } /* Kicsit hosszabb (150px) csíkot húz, hogy szaftosabb legyen! */
+}
+
+#hitmarker { position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%) rotate(45deg); pointer-events: none; z-index: 21; }
+#hitmarker::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 2px; background: rgba(255, 0, 0, 0.9); transform: translateY(-50%); box-shadow: 0 0 5px red; }
+#hitmarker::after { content: ''; position: absolute; top: 0; left: 50%; width: 2px; height: 100%; background: rgba(255, 0, 0, 0.9); transform: translateX(-50%); box-shadow: 0 0 5px red; }
+#headshot-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #ff0000; font-size: 40px; font-family: 'Share Tech Mono', monospace; font-weight: bold; text-shadow: 0 0 15px #ff0000; z-index: 50; pointer-events: none; }
+.headshot-anim { animation: popUp 0.6s ease-out forwards; }
+@keyframes popUp { 0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; } 100% { transform: translate(-50%, -150%) scale(1.5); opacity: 0; } }
+
+/* ==========================================
+   ÚJ FEKETE PIAC: KÖZÉPRE ZÁRT SCI-FI TERMINÁL
+   ========================================== */
+
+/* A háttér elsötétíti a játékteret */
+#shop-menu {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 5, 0, 0.85); /* Sötét overlays */
+    display: flex; justify-content: center; align-items: center; /* KÖZÉPRE ZÁRÁS */
+    z-index: 200; backdrop-filter: blur(8px);
+}
+
+/* Maga a Monitor (Középen lebegő doboz) */
+#terminal-screen {
+    position: relative;
+    width: 90%; max-width: 800px; max-height: 90vh;
+    background: #020a02;
+    border: 3px solid #00aa00;
+    border-radius: 10px;
+    box-shadow: 0 0 20px #00ff00, inset 0 0 50px rgba(0, 255, 0, 0.2);
+    padding: 30px;
+    display: flex; flex-direction: column; align-items: center;
+    overflow-y: auto;
+}
+
+/* TV Csíkok (Scanlines) - Most már CSAK a monitoron belül */
+#terminal-screen::after {
+    content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: repeating-linear-gradient(0deg, rgba(0,255,0,0.03), rgba(0,255,0,0.03) 1px, transparent 1px, transparent 3px);
+    pointer-events: none; z-index: 10;
+}
+
+/* Címek a monitoron belül */
+.terminal-header {
+    font-size: 40px; color: #fff; text-shadow: 0 0 10px #00ff00;
+    margin-bottom: 5px; text-transform: uppercase; letter-spacing: 4px; z-index: 20;
+}
+.terminal-sub {
+    font-size: 24px; color: #00ff00; margin-bottom: 25px;
+    border-bottom: 1px solid #005500; padding-bottom: 10px; width: 100%; text-align: center; z-index: 20;
+}
+#shop-points { color: #ffcc00; text-shadow: 0 0 10px #ffaa00; font-weight: bold; font-size: 30px; }
+
+/* ==========================================
+   OMNICORP TERMINÁL FÜLEK (TABS)
+   ========================================== */
+.shop-tabs { display: flex; gap: 10px; margin-bottom: 20px; z-index: 20; justify-content: center; width: 100%; border-bottom: 2px solid #003333; padding-bottom: 10px; }
+.tab-btn {
+    background: transparent; color: #008888; border: 1px solid #004444;
+    padding: 10px 25px; font-family: 'Share Tech Mono', monospace; font-size: 16px;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 2px;
+    transition: 0.2s; border-radius: 3px;
+}
+/* Itt egységesítjük a ciánkékre az összes fület! */
+.tab-btn:hover:not(.active) { background: rgba(0, 255, 255, 0.1); color: #00ffff; }
+.tab-btn.active { background: #004444; color: #00ffff; border-color: #00ffff; font-weight: bold; box-shadow: 0 0 10px rgba(0,255,255,0.3); }
+
+
+/* ==========================================
+   OMNICORP TERMINÁL KÁRTYÁK (LEGAL CLEAN)
+   ========================================== */
+.shop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; width: 100%; }
+
+.shop-btn {
+    background: rgba(0, 30, 30, 0.6);
+    border: 1px solid #005555; 
+    border-left: 5px solid #008888;
+    color: #fff; 
+    padding: 15px; 
+    font-family: 'Share Tech Mono', monospace;
+    text-align: left; 
+    cursor: pointer; 
+    transition: 0.2s;
+    display: flex; 
+    flex-direction: column; 
+    justify-content: center;
+    position: relative;
+    box-shadow: inset 0 0 10px rgba(0, 255, 255, 0.05);
+    
+    /* ÚJ: Fix minimum magasság, hogy soha ne "ugráljon" a kártya! */
+    min-height: 120px; 
+}
+
+.shop-btn:hover:not(:disabled) {
+    background: rgba(0, 60, 60, 0.8); border-left: 8px solid #00ffff; border-color: #00ffff;
+    transform: scale(1.02); box-shadow: 0 0 15px rgba(0, 255, 255, 0.3), inset 0 0 20px rgba(0, 255, 255, 0.1);
+}
+.shop-btn:active:not(:disabled) { background: #00ffff; color: #000; }
+.shop-btn:disabled { border-left-color: #222; border-color: #222; background: rgba(10, 10, 10, 0.6); cursor: not-allowed; opacity: 0.5; }
+
+/* Szövegek formázása a kártyákon belül */
+.item-header { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 8px; border-bottom: 1px solid #003333; padding-bottom: 5px;}
+.item-name { font-size: 18px; font-weight: bold; color: #00ffff; letter-spacing: 1px; }
+
+/* Az árakat is a hidegebb, zöldes/kék irányba toljuk a sárga helyett */
+.item-stat { font-size: 14px; color: #ccc; margin-bottom: 8px; line-height: 1.4; }
+.item-price { font-size: 14px; color: #00ff00; font-weight: bold; }
+
+.shop-btn:hover:not(:disabled) .item-name { color: #fff; text-shadow: 0 0 8px #00ffff; }
+.shop-btn:disabled .item-name { color: #555; }
+.shop-btn:disabled .item-stat, .shop-btn:disabled .item-price { color: #444; }
+
+/* Gyorsművelet gombok (Lőszer, Sterilizálás) Visszafogott OmniCorp Dizájn! */
+.btn-action { border-left-color: #00aaaa; border-color: #005555; background: rgba(0, 40, 40, 0.6); }
+.btn-action:hover:not(:disabled) { border-left-color: #00ffff; border-color: #00ffff; box-shadow: 0 0 15px rgba(0, 255, 255, 0.3); }
+.btn-action .item-name { color: #00ffff; }
+
+/* Mobil nézet javítása */
+@media (max-width: 600px) {
+    .shop-grid { grid-template-columns: 1fr; }
+    #terminal-screen { padding: 15px; width: 95%; max-height: 95vh; }
+    .terminal-header { font-size: 28px; }
+    .item-name { font-size: 18px; }
+}
+/* Páncél csík (JAVÍTOTT VERZIÓ) */
+#armor-fill {
+    height: 100%; 
+    background-color: #00aaff;
+    transition: width 0.2s; 
+    box-shadow: 0 0 10px rgba(0, 170, 255, 0.5); 
+    opacity: 0.9;
+}
+
+/* Fegyver infók */
+#switch-weapon-btn {
+    position: absolute; bottom: 30px; right: 130px; padding: 15px; border-radius: 50%;
+    background: rgba(0, 0, 150, 0.3); border: 2px solid #00aaff; color: #fff;
+    font-family: 'Share Tech Mono', monospace; font-size: 14px; pointer-events: auto; z-index: 30;
+}
+#weapon-info-display {
+    position: absolute; bottom: 170px; right: 30px; color: #fff; font-size: 20px;
+    text-shadow: 0 0 8px #fff; z-index: 20; text-align: right;
+}
+
+/* Mobil fektetett nézet (alacsony képernyő) javítása a boltnál */
+@media (max-height: 500px) {
+    #shop-menu { justify-content: flex-start; overflow-y: auto; padding: 10px 0; }
+    #shop-menu h2 { font-size: 24px; margin-bottom: 5px; margin-top: 10px; }
+    #shop-points { font-size: 20px; margin: 5px 0; }
+    .shop-grid { gap: 10px; margin: 10px; }
+    .shop-btn { padding: 10px; font-size: 14px; }
+    #close-shop-btn { margin-top: 10px; padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
+}
+
+
+
+/* Különleges Képesség (Fagyasztás) Gomb a játéktérre */
+#freeze-btn {
+    position: absolute; bottom: 130px; left: 30px; padding: 15px; border-radius: 10px;
+    background: rgba(0, 150, 255, 0.3); border: 2px solid #00ffff; color: #fff;
+    font-family: 'Share Tech Mono', monospace; font-size: 18px; font-weight: bold;
+    pointer-events: auto; z-index: 30; box-shadow: 0 0 15px rgba(0, 255, 255, 0.4);
+}
+#freeze-btn:active { background: rgba(0, 255, 255, 0.6); transform: scale(0.95); }
+#freeze-btn:disabled { background: rgba(50, 50, 50, 0.5); border-color: #555; color: #555; box-shadow: none; }
+
+/* Jég effekt a képernyőn fagyasztáskor */
+#ice-overlay {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 4;
+    background: radial-gradient(circle, transparent 40%, rgba(0, 200, 255, 0.2) 80%, rgba(0, 100, 255, 0.5) 100%);
+    box-shadow: inset 0 0 50px rgba(0, 255, 255, 0.3); opacity: 0; transition: opacity 0.3s;
+}
+
+/* --- ÚJ: TELEPORT / GLITCH EFFEKT --- */
+#glitch-overlay {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    pointer-events: none; z-index: 35; opacity: 0;
+    background: rgba(0, 255, 0, 0.1);
+}
+/* TV csíkok a glitch alatt */
+#glitch-overlay::after {
+    content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.3), rgba(0,0,0,0.3) 2px, transparent 2px, transparent 4px);
+}
+/* Animáció */
+.glitch-active {
+    animation: glitchAnim 0.2s linear infinite;
+}
+@keyframes glitchAnim {
+    0% { opacity: 0.1; background: rgba(0, 255, 0, 0.1); }
+    25% { opacity: 0.6; background: rgba(255, 0, 0, 0.2); }
+    50% { opacity: 0.2; background: rgba(0, 0, 0, 0.4); }
+    75% { opacity: 0.8; background: rgba(0, 255, 255, 0.1); }
+    100% { opacity: 0.1; background: rgba(0, 255, 0, 0.1); }
+}
+
+/* ==========================================
+   BRUTÁLIS DROG / MÉRGEZÉS EFFEKT
+   ========================================== */
+/* Ezt az osztályt egyenesen a <body>-ra tesszük rá, így a teljes 3D teret és a HUD-ot is eltorzítja! */
+body.drugged {
+    animation: badTrip 2.5s infinite alternate ease-in-out;
+    /* Picit ránagyítunk, hogy a rángatózásnál ne lógjon ki a fekete háttér */
+    transform-origin: center center;
+}
+
+@keyframes badTrip {
+    0% { 
+        filter: blur(2px) hue-rotate(45deg) saturate(200%); 
+        transform: scale(1.05) translate(10px, 5px) rotate(1deg); 
+    }
+    33% { 
+        filter: blur(6px) hue-rotate(-45deg) saturate(300%); 
+        transform: scale(1.15) translate(-15px, -10px) rotate(-2deg); 
+    }
+    66% { 
+        filter: blur(3px) hue-rotate(90deg) saturate(150%); 
+        transform: scale(1.1) translate(15px, 15px) skewX(3deg); 
+    }
+    100% { 
+        filter: blur(8px) hue-rotate(-90deg) saturate(400%); 
+        transform: scale(1.2) translate(-10px, -5px) skewY(-3deg); 
+    }
+}
+
+/* PAJZS IKON ANIMÁCIÓ */
+#shield-icon {
+    position: absolute; 
+    top: 50%; left: 50%; 
+    transform: translate(20px, -20px); /* Kicsit feljebb és jobbra a célkereszttől */
+    font-size: 24px;
+    z-index: 50; 
+    pointer-events: none;
+    text-shadow: 0 0 10px rgba(255,255,255,0.8);
+}
+
+.shield-anim {
+    animation: shieldPop 0.4s ease-out forwards;
+}
+
+@keyframes shieldPop {
+    0% { transform: translate(20px, -20px) scale(0.5); opacity: 1; }
+    50% { transform: translate(30px, -30px) scale(1.5); opacity: 1; }
+    100% { transform: translate(40px, -40px) scale(1.0); opacity: 0; }
+}
+
+/* ARCHÍVUM GOMBOK */
+.archive-entry-btn {
+    background: transparent; color: #00ffff; border: 1px solid #005555;
+    padding: 10px; font-family: 'Share Tech Mono', monospace; font-size: 16px;
+    text-align: left; cursor: pointer; transition: 0.2s;
+}
+.archive-entry-btn:hover { background: rgba(0, 255, 255, 0.2); border-color: #00ffff; }
+.archive-entry-btn.active { background: #00ffff; color: #000; font-weight: bold; }
+.archive-entry-btn.locked { color: #555; border-color: #333; cursor: not-allowed; }
+.archive-entry-btn.locked:hover { background: transparent; border-color: #333; }
+
+/* ARCHÍVUM KATEGÓRIA FÜLEK */
+.archive-tab-btn {
+    background: transparent; color: #008888; border: 1px solid #004444;
+    padding: 8px 20px; font-family: 'Share Tech Mono', monospace; font-size: 16px;
+    cursor: pointer; transition: 0.2s; text-transform: uppercase; border-radius: 3px;
+}
+.archive-tab-btn:hover { background: rgba(0, 255, 255, 0.1); color: #00ffff; }
+.archive-tab-btn.active { background: #004444; color: #00ffff; border-color: #00ffff; font-weight: bold; box-shadow: 0 0 10px rgba(0,255,255,0.3); }
+
+/* DIREKTÍVA FÜLEK ÉS KÁRTYÁK (PRÉMIUM CIÁNKÉK) */
+.dir-tab-btn { background: transparent; color: #008888; border: 1px solid #004444; padding: 8px 20px; font-family: 'Share Tech Mono', monospace; font-size: 16px; cursor: pointer; transition: 0.2s; border-radius: 3px; }
+.dir-tab-btn:hover { background: rgba(0, 255, 255, 0.1); color: #00ffff; }
+.dir-tab-btn.active { background: #004444; color: #00ffff; border-color: #00ffff; font-weight: bold; box-shadow: 0 0 10px rgba(0,255,255,0.3); }
+
+.directive-card {
+    background: rgba(0, 30, 30, 0.7); border: 1px solid #00ffff; border-left: 5px solid #00ffff;
+    padding: 15px; color: #fff; font-family: 'Share Tech Mono', monospace;
+    text-align: left; transition: 0.2s; position: relative;
+}
+.directive-card h4 { margin: 0 0 5px 0; color: #00ffff; font-size: 20px; text-transform: uppercase; }
+.directive-card p { margin: 0 0 10px 0; color: #ccc; font-size: 14px; }
+.directive-card .reward { color: #00ff00; font-weight: bold; font-size: 16px; }
+
+.directive-action-btn {
+    background: rgba(0, 50, 50, 0.9); border: 1px solid #00ffff; color: #00ffff;
+    padding: 8px 15px; font-family: inherit; font-size: 14px; cursor: pointer;
+    text-transform: uppercase; transition: 0.2s; position: absolute; right: 15px; bottom: 15px;
+}
+.directive-action-btn:hover { background: #00ffff; color: #000; box-shadow: 0 0 10px #00ffff; }
+
+.directive-abandon-btn { border-color: #ff5555; color: #ff5555; }
+.directive-abandon-btn:hover { background: #ff0000; color: #000; box-shadow: 0 0 10px #ff0000; }
+
+/* ==========================================
+   FŐMENÜ: SZÍNES NEHÉZSÉGI GOMBOK
+   ========================================== */
+.diff-btn {
+    background: rgba(10, 10, 10, 0.8); 
+    padding: 10px 20px; 
+    font-family: 'Share Tech Mono', monospace; 
+    font-size: 18px; 
+    cursor: pointer; 
+    transition: 0.3s; 
+    border-radius: 5px;
+    text-transform: uppercase;
+    color: #fff;
+    min-width: 130px;
+}
+
+/* 1. EASY (STANDARD) - KÉK */
+.diff-easy { border: 2px solid #0055ff; }
+.diff-easy:hover { background: rgba(0, 85, 255, 0.2); box-shadow: 0 0 15px rgba(0, 85, 255, 0.4); }
+.diff-easy.active { background: rgba(0, 85, 255, 0.4); border-color: #00aaff; box-shadow: 0 0 20px #00aaff, inset 0 0 10px #00aaff; font-weight: bold; text-shadow: 0 0 5px #fff; }
+
+/* 2. MEDIUM (HAZARD) - SÁRGA */
+.diff-medium { border: 2px solid #aa6600; }
+.diff-medium:hover { background: rgba(170, 102, 0, 0.2); box-shadow: 0 0 15px rgba(255, 153, 0, 0.4); }
+.diff-medium.active { background: rgba(170, 102, 0, 0.4); border-color: #ffaa00; box-shadow: 0 0 20px #ffaa00, inset 0 0 10px #ffaa00; font-weight: bold; text-shadow: 0 0 5px #fff; }
+
+/* 3. HARD (NIGHTMARE) - PIROS */
+.diff-hard { border: 2px solid #aa0000; }
+.diff-hard:hover { background: rgba(170, 0, 0, 0.2); box-shadow: 0 0 15px rgba(255, 0, 0, 0.4); }
+.diff-hard.active { background: rgba(170, 0, 0, 0.4); border-color: #ff2222; box-shadow: 0 0 20px #ff2222, inset 0 0 10px #ff2222; font-weight: bold; text-shadow: 0 0 5px #fff; }
+
+
+/* ==========================================
+   TÉRBELI ANOMÁLIA (VÉSZJELZŐ) ANIMÁCIÓ
+   ========================================== */
+#wave-display {
+    position: absolute; top: 25%; left: 50%; transform: translateX(-50%);
+    color: #ff2222; font-size: 40px; font-weight: bold;
+    text-shadow: 0 0 20px #ff0000, 0 0 40px #ff0000;
+    text-transform: uppercase; letter-spacing: 5px;
+    background: rgba(50, 0, 0, 0.4); border: 2px solid #ff0000;
+    padding: 15px 40px; border-radius: 10px;
+    box-shadow: 0 0 30px rgba(255, 0, 0, 0.6), inset 0 0 20px rgba(255, 0, 0, 0.4);
+    z-index: 50; text-align: center;
+    backdrop-filter: blur(5px);
+    /* Pulzáló animáció */
+    animation: sirenPulse 1s infinite alternate;
+}
+
+@keyframes sirenPulse {
+    0% { transform: translateX(-50%) scale(0.95); opacity: 0.8; box-shadow: 0 0 10px rgba(255, 0, 0, 0.3); text-shadow: 0 0 10px #ff0000; }
+    100% { transform: translateX(-50%) scale(1.05); opacity: 1.0; box-shadow: 0 0 50px rgba(255, 0, 0, 0.8), inset 0 0 30px rgba(255, 0, 0, 0.6); text-shadow: 0 0 30px #ff0000, 0 0 60px #ff0000; }
+}
+
+/* Amikor a tényleges hullámszámot írja ki, az maradjon kék/fehér! */
+#wave-display.normal-wave {
+    color: #fff; text-shadow: 0 0 15px #00ffff;
+    background: transparent; border: none; box-shadow: none; backdrop-filter: none;
+    animation: popUp 2s ease-out forwards; /* Megjelenik és eltűnik */
+}
+/* HP Gyorsművelet Gomb (Piros) */
+.btn-heal { border-left-color: #ff3333; border-color: #550000; background: rgba(30, 0, 0, 0.6); }
+.btn-heal:hover:not(:disabled) { border-left-color: #ff0000; border-color: #ff0000; box-shadow: 0 0 15px rgba(255, 0, 0, 0.3); }
+.btn-heal .item-name { color: #ff5555; }
+
+/* TACTICAL HUD GOMBOK */
+.hud-btn { transition: 0.1s; letter-spacing: 1px; }
+.hud-btn:active { transform: scale(0.9); }
+#switch-weapon-btn:active { background: #00ffff; color: #000; }
+#shoot-btn:active { background: #ff0000; color: #fff; box-shadow: 0 0 30px #ff0000; }
+
+/* --- ÚJ: OMNICORP CSÚSZKA STÍLUS --- */
+.cyber-slider {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: rgba(0, 50, 50, 0.5); 
+    outline: none; border: 1px solid #005555; border-radius: 4px;
+}
+.cyber-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 20px; height: 20px;
+    background: #00ffff; cursor: pointer; border-radius: 2px; box-shadow: 0 0 10px #00ffff;
+}
+
+/* --- ÚJ: OPCIÓK MENÜ FÜLEK (TABS) STÍLUSA --- */
+.opt-tab-btn {
+    background: transparent;
+    color: #00aaaa;
+    border: 1px solid #004444;
+    padding: 8px 20px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 16px;
+    cursor: pointer;
+    transition: 0.2s;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Amikor fölé viszed az egeret */
+.opt-tab-btn:hover {
+    background: rgba(0, 255, 255, 0.1);
+    color: #00ffff;
+    border-color: #00ffff;
+}
+
+/* Az éppen kiválasztott (aktív) fül kinézete */
+.opt-tab-btn.active {
+    background: #005555 !important;
+    color: #00ffff !important;
+    border-color: #00ffff !important;
+    box-shadow: 0 0 10px rgba(0,255,255,0.3);
+    font-weight: bold;
+}
+
+/* ==========================================
+   CINEMATIKUS TÖLTŐKÉPERNYŐ EFFEKTEK
+   ========================================== */
+.pulse-logo {
+    animation: pulseGlow 2s infinite alternate ease-in-out;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+.pulse-logo:hover {
+    transform: scale(1.05);
+}
+@keyframes pulseGlow {
+    0% { filter: drop-shadow(0 0 10px rgba(0, 255, 255, 0.4)); transform: scale(0.95); }
+    100% { filter: drop-shadow(0 0 40px rgba(0, 255, 255, 0.9)); transform: scale(1.05); }
+}
+
+.fade-transition {
+    transition: opacity 1s ease-in-out;
+}
+
+/* ==========================================
+   OMNICORP CUSTOM SCROLLBAR (GÖRGETŐSÁV)
+   ========================================== */
+::-webkit-scrollbar {
+    width: 8px; /* Karcsú, modern vastagság */
+    background: rgba(0, 15, 15, 0.9); /* Sötét háttér */
+    border-left: 1px solid #003333;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #005555; /* Alap szín */
+    border-radius: 4px;
+    box-shadow: inset 0 0 5px rgba(0, 255, 255, 0.2);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #00ffff; /* Világít, ha ráhúzod az egeret! */
+    box-shadow: 0 0 10px #00ffff;
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Enyhe, de állandó beteges színeltolódás a magas fertőzéshez */
+body.infected-mild {
+    filter: saturate(150%) hue-rotate(15deg);
+}
+body.infected-medium {
+    filter: saturate(200%) hue-rotate(30deg) contrast(120%);
+}
+body.infected-severe {
+    filter: saturate(250%) hue-rotate(45deg) contrast(150%) blur(1px);
+}
+
+/* --- ÚJ: Játékos (Piros) Vérfröccs Modifikátor --- */
+.visor-blood-splatter.red {
+    background: rgba(220, 20, 20, 0.85);
+    box-shadow: inset 0 -2px 4px rgba(100, 0, 0, 0.6), 0 0 8px rgba(220, 20, 20, 0.6);
+}
+
+/* A lefolyó csík színe a piros vérhez */
+.visor-blood-splatter.red::after {
+    background: linear-gradient(to top, rgba(220, 20, 20, 0.85) 0%, rgba(220, 20, 20, 0) 100%);
+}
+
+/* --- ÚJ: SAVAS POCSOLYA EFFEKT (Alapbeállítások) --- */
+#acid-overlay {
+    position: absolute; 
+    bottom: 0; left: 0; 
+    width: 100vw; height: 60vh; 
+    pointer-events: none; 
+    z-index: 6; 
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+/* 1. FÁZIS (Zöld - Friss) */
+.acid-green {
+    background: linear-gradient(to top, rgba(150, 255, 0, 0.4) 0%, rgba(100, 255, 0, 0.1) 40%, transparent 100%);
+    box-shadow: inset 0 -30px 50px rgba(100, 255, 0, 0.2);
+}
+
+/* 2. FÁZIS (Sárga - Rothadó) */
+.acid-yellow {
+    background: linear-gradient(to top, rgba(255, 200, 0, 0.4) 0%, rgba(200, 150, 0, 0.1) 40%, transparent 100%);
+    box-shadow: inset 0 -30px 50px rgba(255, 200, 0, 0.2);
+}
+
+/* 3. FÁZIS (Vörös - Kritikus) */
+.acid-red {
+    background: linear-gradient(to top, rgba(255, 0, 0, 0.5) 0%, rgba(200, 0, 0, 0.15) 40%, transparent 100%);
+    box-shadow: inset 0 -30px 50px rgba(255, 0, 0, 0.3);
+}
+
+/* Pulzáló, forrongó animáció a savnak (Ez marad, ahogy volt!) */
+.acid-burn-active {
+    animation: acidBoil 0.5s infinite alternate ease-in-out;
+}
+@keyframes acidBoil {
+    0% { opacity: 0.6; filter: blur(0px) hue-rotate(0deg); }
+    100% { opacity: 1.0; filter: blur(2px) hue-rotate(20deg) brightness(1.2); } 
+}
