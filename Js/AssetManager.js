@@ -12,6 +12,7 @@ class AssetManager {
         
         this.models = {};
         this.textures = {};
+        this.texturesByUrl = new Map();
         this.audioBuffers = {};
 
         this._initLoaders();
@@ -40,8 +41,10 @@ class AssetManager {
             let model = gltf.scene;
             model.traverse((c) => { 
                 if(c.isMesh) {
-                    c.frustumCulled = false;
-                    c.castShadow = true;
+                    // Látvány megőrzése mellett: a renderelő hatékonyabb lesz, ha a frustum culling és a shadow check normál módon működik.
+                    c.frustumCulled = true;
+                    c.castShadow = false; // A renderer shadowMap kikapcsolt, ezért a shadow cast teljesen felesleges.
+                    c.receiveShadow = false;
                 }
             });
             // NE hozz létre itt AnimationMixer-t, azt a modulok végzik!
@@ -50,7 +53,11 @@ class AssetManager {
     }
 
     loadTexture(name, url, wrapAndRepeat = false) {
-        const tex = this.textureLoader.load(url);
+        let tex = this.texturesByUrl.get(url);
+        if (!tex) {
+            tex = this.textureLoader.load(url);
+            this.texturesByUrl.set(url, tex);
+        }
         if (wrapAndRepeat) {
             tex.wrapS = THREE.RepeatWrapping; 
             tex.wrapT = THREE.RepeatWrapping; 

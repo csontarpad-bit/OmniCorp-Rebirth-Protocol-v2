@@ -97,13 +97,83 @@ AssetManager.loadAll();
 // --- 4. Fő Játékhurok (Game Loop) ---
 let lastTime = performance.now();
 let menuYaw = 0;
+const perfPanel = document.createElement('div');
+perfPanel.id = 'game-performance-monitor';
+perfPanel.style.cssText = 'position:fixed;top:12px;right:12px;z-index:9000;display:none;pointer-events:none;padding:10px 12px;background:rgba(0,12,12,.88);border:1px solid #00ccaa;color:#baffef;font:12px/1.5 monospace;white-space:pre;box-shadow:0 0 12px rgba(0,204,170,.25)';
+document.body.appendChild(perfPanel);
+
+const perfSamples = new Float32Array(300);
+const updatePerfSamples = new Float32Array(300);
+const renderPerfSamples = new Float32Array(300);
+let perfSampleIndex = 0;
+let perfSampleCount = 0;
+let perfFrameCount = 0;
+let perfLastReportTime = lastTime;
+let lowPerfDuration = 0;
+let highPerfDuration = 0;
+let perfVisible = new URLSearchParams(window.location.search).get('perf') === '1';
+perfPanel.style.display = perfVisible ? 'block' : 'none';
+
+window.__gamePerf = {
+    fps: 0,
+    avgFps: 0,
+    minFps: 0,
+    frameMs: 0,
+    avgFrameMs: 0,
+    p95FrameMs: 0,
+    updateMs: 0,
+    updateP95Ms: 0,
+    renderMs: 0,
+    renderP95Ms: 0,
+    drawCalls: 0,
+    triangles: 0,
+    dynamicLights: 0,
+    renderPixelRatio: 1,
+    enemies: 0,
+    gameState: gameManager.gameState,
+    sampleWindowMs: 0
+};
+
+function summarizePerfSamples(samples, count) {
+    const sorted = Array.from(samples.subarray(0, count)).sort((a, b) => a - b);
+    let total = 0;
+    for (let i = 0; i < sorted.length; i++) total += sorted[i];
+    const p95Index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
+    return {
+        average: sorted.length ? total / sorted.length : 0,
+        p95: sorted[p95Index] || 0,
+        total
+    };
+}
+
+window.__toggleGamePerf = () => {
+    perfVisible = !perfVisible;
+    perfPanel.style.display = perfVisible ? 'block' : 'none';
+};
+
+window.addEventListener('keydown', (event) => {
+    if (event.code === 'F3') {
+        event.preventDefault();
+        window.__toggleGamePerf();
+    }
+});
 
 function animate() {
     requestAnimationFrame(animate);
     
     let time = performance.now();
-    let delta = Math.min((time - lastTime) / 1000, 0.1); // Max 0.1 delta a fizika szétesésének elkerülésére
+    let frameTimeMs = Math.max(0, time - lastTime);
+    let delta = Math.min(frameTimeMs / 1000, 0.1); // Max 0.1 delta a fizika szétesésének elkerülésére
     lastTime = time;
+    const sampleIndex = perfSampleIndex;
+    perfSamples[sampleIndex] = frameTimeMs;
+    perfSampleIndex = (sampleIndex + 1) % perfSamples.length;
+    perfSampleCount = Math.min(perfSampleCount + 1, perfSamples.length);
+    perfFrameCount++;
+    const updateStartTime = performance.now();
+    if (typeof LevelManager.updateLightVisibility === 'function') {
+        LevelManager.updateLightVisibility(Engine.camera);
+    }
 
     // Ha a játék fut
     if (gameManager.gameState === 'PLAYING') {
@@ -133,12 +203,78 @@ function animate() {
     }
 
     // Renderelés
+    const updateTimeMs = performance.now() - updateStartTime;
+    const renderStartTime = performance.now();
     if (Engine.renderer && Engine.scene && Engine.camera) {
         if (typeof Engine.render === 'function') {
             Engine.render();
         } else {
             Engine.renderer.render(Engine.scene, Engine.camera);
         }
+    }
+    const renderTimeMs = performance.now() - renderStartTime;
+    updatePerfSamples[sampleIndex] = updateTimeMs;
+    renderPerfSamples[sampleIndex] = renderTimeMs;
+
+    const reportElapsed = time - perfLastReportTime;
+    if (reportElapsed >= 500) {
+        const frameStats = summarizePerfSamples(perfSamples, perfSampleCount);
+        const updateStats = summarizePerfSamples(updatePerfSamples, perfSampleCount);
+        const renderStats = summarizePerfSamples(renderPerfSamples, perfSampleCount);
+        const maxFrameMs = Math.max(...perfSamples);
+        const perf = window.__gamePerf;
+        perf.fps = perfFrameCount * 1000 / reportElapsed;
+        perf.avgFps = frameStats.average > 0 ? 1000 / frameStats.average : 0;
+        perf.minFps = maxFrameMs > 0 ? 1000 / maxFrameMs : 0;
+        perf.frameMs = frameTimeMs;
+        perf.avgFrameMs = frameStats.average;
+        perf.p95FrameMs = frameStats.p95;
+        perf.updateMs = updateStats.average;
+        perf.updateP95Ms = updateStats.p95;
+        perf.renderMs = renderStats.average;
+        perf.renderP95Ms = renderStats.p95;
+        perf.drawCalls = Engine.renderer ? Engine.renderer.info.render.calls : 0;
+        perf.triangles = Engine.renderer ? Engine.renderer.info.render.triangles : 0;
+        perf.dynamicLights = LevelManager.dynamicLightCandidates.reduce((count, candidate) => count + Number(candidate.light.visible), 0);
+        perf.renderPixelRatio = Engine.renderer ? Engine.renderer.getPixelRatio() : 1;
+        perf.enemies = enemyManager.enemies.length;
+        perf.gameState = gameManager.gameState;
+        perf.sampleWindowMs = frameStats.total;
+
+        if (perf.gameState !== 'PLAYING') {
+            lowPerfDuration = 0;
+            highPerfDuration = 0;
+            if (Engine.renderScale < 1) Engine.setRenderScale(1);
+        } else if (perf.fps < 35 && perf.renderMs > 12) {
+            lowPerfDuration += reportElapsed;
+            highPerfDuration = 0;
+            if (lowPerfDuration >= 2000 && Engine.renderScale > 1 / Engine.basePixelRatio) {
+                Engine.setRenderScale(Engine.renderScale - 0.1);
+                lowPerfDuration = 0;
+            }
+        } else if (perf.fps > 50) {
+            highPerfDuration += reportElapsed;
+            lowPerfDuration = 0;
+            if (highPerfDuration >= 5000 && Engine.renderScale < 1) {
+                Engine.setRenderScale(Engine.renderScale + 0.1);
+                highPerfDuration = 0;
+            }
+        } else {
+            lowPerfDuration = 0;
+            highPerfDuration = 0;
+        }
+
+        if (perfVisible) {
+            perfPanel.textContent = `FPS ${perf.fps.toFixed(1)} | AVG ${perf.avgFps.toFixed(1)} | LOW ${perf.minFps.toFixed(1)}\n` +
+            `FRAME ${perf.frameMs.toFixed(1)} ms | AVG ${perf.avgFrameMs.toFixed(1)} | P95 ${perf.p95FrameMs.toFixed(1)}\n` +
+            `UPDATE ${perf.updateMs.toFixed(2)} ms (P95 ${perf.updateP95Ms.toFixed(2)}) | RENDER ${perf.renderMs.toFixed(2)} (P95 ${perf.renderP95Ms.toFixed(2)})\n` +
+                `DRAWS ${perf.drawCalls} | TRIS ${perf.triangles.toLocaleString()}\n` +
+            `LEVEL LIGHTS ${perf.dynamicLights} | PIXEL RATIO ${perf.renderPixelRatio.toFixed(2)}\n` +
+                `ENEMIES ${perf.enemies} | ${perf.gameState}`;
+        }
+
+        perfFrameCount = 0;
+        perfLastReportTime = time;
     }
 }
 

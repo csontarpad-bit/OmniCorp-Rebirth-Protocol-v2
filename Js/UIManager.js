@@ -204,7 +204,9 @@ class UIManager {
             }
         });
         EventBus.on('UI_UPDATE_NEEDED', () => {
-            this.updateShopButtons();
+            if (this.shopMenu && !this.shopMenu.classList.contains('hidden')) {
+                EventBus.emit('REQUEST_SHOP_UPDATE');
+            }
         });
     }
 
@@ -708,49 +710,90 @@ class UIManager {
     }
 
     updateHUD(data) {
-        if (this.healthFill) this.healthFill.style.width = Math.max(0, data.playerHealth) + '%';
-        if (this.armorFill) this.armorFill.style.width = Math.max(0, data.playerArmor) + '%';
+        const previous = this.lastHudSnapshot || {};
 
-        const healthNum = document.getElementById('health-number');
-        if (healthNum) healthNum.innerHTML = Math.max(0, Math.floor(data.playerHealth));
-
-        const resCounter = document.getElementById('resonator-counter');
-        if (resCounter) {
-            if (data.playerResonators > 0) {
-                resCounter.style.display = 'inline-block';
-                resCounter.innerText = `[ S-R: ${data.playerResonators} ]`;
-            } else resCounter.style.display = 'none';
+        if (data.playerHealth !== previous.playerHealth) {
+            if (this.healthFill) this.healthFill.style.width = Math.max(0, data.playerHealth) + '%';
+            const healthNum = document.getElementById('health-number');
+            if (healthNum) healthNum.textContent = Math.max(0, Math.floor(data.playerHealth));
         }
 
-        const medkitCounter = document.getElementById('medkit-counter');
-        if (medkitCounter) {
-            if (data.playerMedkits > 0) {
-                medkitCounter.style.display = 'inline-block';
-                medkitCounter.innerText = `[+${data.playerMedkits}]`;
-            } else medkitCounter.style.display = 'none';
+        if (data.playerArmor !== previous.playerArmor && this.armorFill) {
+            this.armorFill.style.width = Math.max(0, data.playerArmor) + '%';
         }
 
-        const staminaFill = document.getElementById('stamina-fill');
-        if (staminaFill) {
-            staminaFill.style.width = Math.max(0, data.playerStamina) + '%';
-            if (data.isExhausted) {
-                staminaFill.style.background = '#ff5555';
-                staminaFill.style.boxShadow = '0 0 5px #ff0000';
-            } else {
-                staminaFill.style.background = '#00ffcc';
-                staminaFill.style.boxShadow = '0 0 5px #00ffcc';
+        if (data.playerResonators !== previous.playerResonators) {
+            const resCounter = document.getElementById('resonator-counter');
+            if (resCounter) {
+                resCounter.style.display = data.playerResonators > 0 ? 'inline-block' : 'none';
+                if (data.playerResonators > 0) resCounter.textContent = `[ S-R: ${data.playerResonators} ]`;
             }
         }
 
-        this.updateBonusTimer(data);
-        this.updateWeaponHUD(data);
-        this.updateDirectiveHUD(data);
+        if (data.playerMedkits !== previous.playerMedkits) {
+            const medkitCounter = document.getElementById('medkit-counter');
+            if (medkitCounter) {
+                medkitCounter.style.display = data.playerMedkits > 0 ? 'inline-block' : 'none';
+                if (data.playerMedkits > 0) medkitCounter.textContent = `[+${data.playerMedkits}]`;
+            }
+        }
+
+        if (data.playerStamina !== previous.playerStamina) {
+            const staminaFill = document.getElementById('stamina-fill');
+            if (staminaFill) staminaFill.style.width = Math.max(0, data.playerStamina) + '%';
+        }
+
+        if (data.isExhausted !== previous.isExhausted) {
+            const staminaFill = document.getElementById('stamina-fill');
+            if (staminaFill) {
+                staminaFill.style.background = data.isExhausted ? '#ff5555' : '#00ffcc';
+                staminaFill.style.boxShadow = data.isExhausted ? '0 0 5px #ff0000' : '0 0 5px #00ffcc';
+            }
+        }
+
+        const timeTenths = data.isWaveActive ? Math.floor(data.timeLeft * 10) : null;
+        if (data.isWaveActive !== previous.isWaveActive || timeTenths !== previous.timeTenths || data.parTime !== previous.parTime) {
+            this.updateBonusTimer(data);
+        }
+
+        const weapon = data.weaponData;
+        if (weapon !== previous.weapon || weapon?.ammo !== previous.weaponAmmo || weapon?.reserve !== previous.weaponReserve) {
+            this.updateWeaponHUD(data);
+        }
+
+        if (data.activeDirective !== previous.activeDirective || data.directiveProgress !== previous.directiveProgress || data.gameState !== previous.gameState) {
+            this.updateDirectiveHUD(data);
+        }
+
+        const infection = Math.floor(data.playerInfection);
+        if (infection !== previous.infection) this.updateInfection({ playerInfection: infection });
+
+        this.lastHudSnapshot = {
+            playerHealth: data.playerHealth,
+            playerArmor: data.playerArmor,
+            playerResonators: data.playerResonators,
+            playerMedkits: data.playerMedkits,
+            playerStamina: data.playerStamina,
+            isExhausted: data.isExhausted,
+            isWaveActive: data.isWaveActive,
+            timeTenths,
+            parTime: data.parTime,
+            weapon,
+            weaponAmmo: weapon?.ammo,
+            weaponReserve: weapon?.reserve,
+            activeDirective: data.activeDirective,
+            directiveProgress: data.directiveProgress,
+            gameState: data.gameState,
+            infection
+        };
     }
 
     updateInfection(data) {
         const infNum = document.getElementById('infection-number');
         if (infNum) {
             let inf = Math.floor(data.playerInfection);
+            if (infNum.dataset.value === String(inf)) return;
+            infNum.dataset.value = String(inf);
             infNum.innerHTML = inf + '%';
             if (inf < 30) {
                 infNum.style.color = '#00ff00'; infNum.style.textShadow = '0 0 5px #00ff00';
@@ -841,7 +884,9 @@ class UIManager {
         if (!data.weaponData) return;
         let w = data.weaponData;
         const weaponIcon = document.getElementById('weapon-icon-display');
-        if (weaponIcon) {
+        const image = w.image || '';
+        if (weaponIcon && weaponIcon.dataset.weaponImage !== image) {
+            weaponIcon.dataset.weaponImage = image;
             weaponIcon.innerHTML = `<img src="${w.image}" style="width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 0 5px rgba(0,255,255,0.8));">`;
         }
 

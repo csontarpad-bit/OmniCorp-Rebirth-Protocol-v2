@@ -7,6 +7,9 @@ class Engine {
         this.renderer = null;
         this.clock = null;
         this.listener = null;
+        this.basePixelRatio = 1;
+        this.renderScale = 1;
+        this.minimumPixelRatio = 0.7;
     }
 
     init() {
@@ -26,10 +29,14 @@ class Engine {
         // --- 3. Renderer ---
         this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
-        this.renderer.physicallyCorrectLights = true; 
+        this.basePixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+        this.renderer.setPixelRatio(this.basePixelRatio);
+        this.renderer.physicallyCorrectLights = true;
         this.renderer.outputEncoding = THREE.LinearEncoding; // Eredeti sötét, kontrasztos hangulat
         this.renderer.shadowMap.enabled = false;
+
+        // A látvány megőrzése mellett a render költség csökkentése a fő cél.
+        // A shadow mapet már le van tiltva, ezért itt a felbontás csökkentése a legjobb kompromisszum.
         
         let container = document.getElementById('game-container');
         if (!container) {
@@ -59,6 +66,15 @@ class Engine {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    setRenderScale(scale) {
+        if (!this.renderer) return;
+        const minimumScale = this.minimumPixelRatio / this.basePixelRatio;
+        const nextScale = THREE.MathUtils.clamp(scale, minimumScale, 1);
+        if (Math.abs(nextScale - this.renderScale) < 0.001) return;
+        this.renderScale = nextScale;
+        this.renderer.setPixelRatio(this.basePixelRatio * this.renderScale);
     }
     
     getScene() {

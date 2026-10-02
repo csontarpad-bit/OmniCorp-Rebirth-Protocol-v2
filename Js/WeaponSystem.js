@@ -972,8 +972,9 @@ export class WeaponSystem {
         }
 
         if (this.camera) {
-            this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, this.targetFOV, delta * 5.0);
-            this.camera.updateProjectionMatrix();
+            const previousFov = this.camera.fov;
+            this.camera.fov = THREE.MathUtils.lerp(previousFov, this.targetFOV, delta * 5.0);
+            if (Math.abs(this.camera.fov - previousFov) > 0.001) this.camera.updateProjectionMatrix();
         }
 
         // Automata fegyver (Rifle/SMG) folyamatos tüzelés

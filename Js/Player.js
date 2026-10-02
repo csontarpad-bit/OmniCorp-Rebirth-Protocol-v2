@@ -539,12 +539,9 @@ export class Player {
             targetFOV = 75 - Math.min(weaponSystem.meleeChargeTime * 10, 20);
         }
 
-        if (Math.abs(prevStamina - this.stamina) > 0.1) {
-            EventBus.emit('UI_UPDATE_NEEDED');
-        }
-
-        this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFOV, delta * 5.0);
-        this.camera.updateProjectionMatrix(); 
+        const previousFov = this.camera.fov;
+        this.camera.fov = THREE.MathUtils.lerp(previousFov, targetFOV, delta * 5.0);
+        if (Math.abs(this.camera.fov - previousFov) > 0.001) this.camera.updateProjectionMatrix();
 
         if (isCrouching) {
             speedMult *= 0.4; 

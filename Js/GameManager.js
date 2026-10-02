@@ -283,10 +283,7 @@ export class GameManager {
         // Dobozok lerakása a hullám elején
         if (this.itemManager) {
             if (this.itemManager.lootItems) {
-                for (let item of this.itemManager.lootItems) {
-                    if (item.mesh) this.itemManager.scene.remove(item.mesh);
-                }
-                this.itemManager.lootItems = [];
+                this.itemManager.clearLootItems();
             }
 
             let playerPos = this.player && this.player.camera ? this.player.camera.position : { x: 0, y: 0, z: 0 };
@@ -493,9 +490,6 @@ export class GameManager {
             gameState: this.gameState
         });
 
-        if (this.player) {
-            EventBus.emit('INFECTION_CHANGED', { playerInfection: this.player.infection });
-        }
     }
 
     sendShopData() {

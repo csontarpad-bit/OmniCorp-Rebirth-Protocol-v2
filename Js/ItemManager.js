@@ -30,6 +30,7 @@ class ItemManager {
         this.globalToxicMat = null;
         this.globalRedToxicMat = null;
         this.globalHitboxMat = null;
+        this.plantHitboxGeometry = null;
         this.currentWave = 1;
         this.pendingMutations = [];
 
@@ -68,18 +69,10 @@ class ItemManager {
     }
 
     reset() {
-        if (this.lootItems) {
-            for (let item of this.lootItems) {
-                if (item.mesh && this.scene) this.scene.remove(item.mesh);
-            }
-            this.lootItems = [];
-        }
+        this.clearLootItems();
         if (this.toxicPuddles) {
-            for (let p of this.toxicPuddles) {
-                if (this.scene) this.scene.remove(p);
-                if (p.geometry) p.geometry.dispose();
-            }
-            this.toxicPuddles = [];
+            for (const puddle of this.toxicPuddles) this.disposeToxicPuddle(puddle);
+            this.toxicPuddles.length = 0;
         }
         if (this.activePlants) {
             for (let plant of this.activePlants) {
@@ -154,6 +147,40 @@ class ItemManager {
             wireframe: false, 
             visible: false 
         });
+        this.plantHitboxGeometry = new THREE.CylinderGeometry(0.6, 0.6, 1.5, 8);
+    }
+
+    clearLootItems() {
+        for (const item of this.lootItems) {
+            if (!item.mesh) continue;
+            if (this.scene) this.scene.remove(item.mesh);
+            item.mesh.traverse((child) => {
+                if (!child.isMesh || !child.material) return;
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                for (const material of materials) material.dispose();
+            });
+        }
+        this.lootItems.length = 0;
+    }
+
+    removeLootItem(item) {
+        if (!item || !item.mesh) return;
+        if (this.scene) this.scene.remove(item.mesh);
+        item.mesh.traverse((child) => {
+            if (!child.isMesh || !child.material) return;
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            for (const material of materials) material.dispose();
+        });
+    }
+
+    disposeToxicPuddle(puddle) {
+        if (!puddle) return;
+        if (this.scene) this.scene.remove(puddle);
+        if (puddle.geometry) puddle.geometry.dispose();
+        const materials = Array.isArray(puddle.material) ? puddle.material : [puddle.material];
+        for (const material of materials) {
+            if (material) material.dispose();
+        }
     }
 
     spawnMedkit(x, z) {
@@ -248,7 +275,7 @@ class ItemManager {
         this.scene.add(puddle);
 
         // Lőhető hitbox
-        const plantHitbox = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 1.5, 8), this.globalHitboxMat);
+        const plantHitbox = new THREE.Mesh(this.plantHitboxGeometry, this.globalHitboxMat);
         plantHitbox.position.set(x, 0.75, z);
         
         let newPlant = { mesh: mesh, puddle: puddle, hitbox: plantHitbox, health: 100, x: x, z: z, type: 'plant' };
@@ -318,8 +345,7 @@ class ItemManager {
             let p = this.toxicPuddles[i];
             let dist = Math.hypot(position.x - p.position.x, position.z - p.position.z);
             if (dist <= maxDist) {
-                this.scene.remove(p);
-                if (p.geometry) p.geometry.dispose();
+                this.disposeToxicPuddle(p);
                 this.toxicPuddles.splice(i, 1);
                 removed++;
             }
@@ -433,6 +459,7 @@ class ItemManager {
                 this.scene.remove(p);
                 if (p.material.color) p.material.color.setHex(0x55ff55);
                 p.geometry.dispose();
+                p.material.dispose();
             }
             this.spawnPlant(mut.cx, mut.cz);
         }
@@ -660,7 +687,7 @@ class ItemManager {
                         }
                     }
 
-                    this.scene.remove(this.activeLootTarget.mesh);
+                    this.removeLootItem(this.activeLootTarget);
                     let lIdx = this.lootItems.indexOf(this.activeLootTarget);
                     if (lIdx > -1) this.lootItems.splice(lIdx, 1);
 
@@ -776,8 +803,7 @@ class ItemManager {
             let oldestPuddle = this.toxicPuddles.shift();
             if (oldestPuddle) {
                 this.scene.remove(oldestPuddle);
-                if (oldestPuddle.geometry) oldestPuddle.geometry.dispose();
-                if (oldestPuddle.material) oldestPuddle.material.dispose();
+                this.disposeToxicPuddle(oldestPuddle);
             }
         }
         EventBus.emit('UPDATE_TOXIC_FOG', this.toxicPuddles.length);

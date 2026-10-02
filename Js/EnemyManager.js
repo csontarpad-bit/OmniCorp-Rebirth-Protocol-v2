@@ -14,6 +14,14 @@ export class EnemyManager {
         this.deadBodies = [];
         this.shockwaves = [];
         this.enemyHitboxes = [];
+        this.enemySpatialGrid = new Map();
+        this.enemySpatialCellByEnemy = new Map();
+        this.enemySpatialIndices = new Map();
+        this.nearbyEnemyBuffer = [];
+        this.enemySpatialCellSize = 5;
+        this.hitboxBonePosition = new THREE.Vector3();
+        this.hitboxOffset = new THREE.Vector3();
+        this.hitboxGeometryCache = new Map();
         this.activeFreezeTimer = 0;
         this.currentWave = 1; // FIX: Hullámszám nyomonkövetése az animációs sebességhez
         this.activeResonatorScreams = {};
@@ -56,9 +64,6 @@ export class EnemyManager {
             const en = this.enemies[i];
             if (en.mesh && this.scene) {
                 this.scene.remove(en.mesh);
-                en.mesh.traverse((child) => {
-                    if (child.isMesh && child.geometry) child.geometry.dispose();
-                });
             }
             if (en.bodyHitbox && this.scene) this.scene.remove(en.bodyHitbox);
             if (en.headHitbox && this.scene) this.scene.remove(en.headHitbox);
@@ -69,12 +74,15 @@ export class EnemyManager {
         }
         this.enemies = [];
         this.enemyHitboxes = [];
+        this.enemySpatialGrid.clear();
+        this.enemySpatialCellByEnemy.clear();
+        this.enemySpatialIndices.clear();
+        this.nearbyEnemyBuffer.length = 0;
 
         if (this.deadBodies) {
             this.deadBodies.forEach(db => {
                 if (db.mesh && this.scene) {
                     this.scene.remove(db.mesh);
-                    db.mesh.traverse(c => { if (c.isMesh && c.geometry) c.geometry.dispose(); });
                 }
             });
             this.deadBodies = [];
@@ -84,7 +92,6 @@ export class EnemyManager {
             this.zombiePool.forEach(pz => {
                 if (pz.mesh && this.scene) {
                     this.scene.remove(pz.mesh);
-                    pz.mesh.traverse(c => { if (c.isMesh && c.geometry) c.geometry.dispose(); });
                 }
             });
             this.zombiePool = [];
@@ -104,6 +111,16 @@ export class EnemyManager {
         return this.enemyHitboxes;
     }
 
+    getHitboxGeometry(radius, height) {
+        const key = `${radius}:${height}`;
+        let geometry = this.hitboxGeometryCache.get(key);
+        if (!geometry) {
+            geometry = new THREE.CylinderGeometry(radius, radius, height, 8);
+            this.hitboxGeometryCache.set(key, geometry);
+        }
+        return geometry;
+    }
+
     getEnemyRadius(en) {
         if (!en) return 0.6;
         switch (en.type) {
@@ -120,8 +137,8 @@ export class EnemyManager {
     updateHitboxPositions(en) {
         if (!en || !en.mesh || !en.bodyHitbox || !en.headHitbox) return;
         en.mesh.updateMatrixWorld(true);
-        let bonePos = new THREE.Vector3();
-        let tempOffset = new THREE.Vector3(); 
+        const bonePos = this.hitboxBonePosition;
+        const tempOffset = this.hitboxOffset;
 
         if (en.spineBone) {
             en.spineBone.getWorldPosition(bonePos);
@@ -148,6 +165,74 @@ export class EnemyManager {
         }
     }
 
+    buildEnemySpatialGrid() {
+        for (const cell of this.enemySpatialGrid.values()) cell.length = 0;
+        this.enemySpatialCellByEnemy.clear();
+        this.enemySpatialIndices.clear();
+
+        for (let i = 0; i < this.enemies.length; i++) {
+            const enemy = this.enemies[i];
+            if (!enemy.mesh || enemy.lifeTime <= 0) continue;
+            this.enemySpatialIndices.set(enemy, i);
+            this.updateEnemySpatialGridEntry(enemy);
+        }
+    }
+
+    updateEnemySpatialGridEntry(enemy) {
+        const previousKey = this.enemySpatialCellByEnemy.get(enemy);
+        const isActive = enemy.mesh && enemy.lifeTime > 0;
+
+        if (!isActive) {
+            if (previousKey !== undefined) {
+                const previousCell = this.enemySpatialGrid.get(previousKey);
+                const previousIndex = previousCell ? previousCell.indexOf(enemy) : -1;
+                if (previousIndex !== -1) previousCell.splice(previousIndex, 1);
+                this.enemySpatialCellByEnemy.delete(enemy);
+            }
+            return;
+        }
+
+        const cellX = Math.floor(enemy.mesh.position.x / this.enemySpatialCellSize);
+        const cellZ = Math.floor(enemy.mesh.position.z / this.enemySpatialCellSize);
+        const key = `${cellX},${cellZ}`;
+        if (key === previousKey) return;
+
+        if (previousKey !== undefined) {
+            const previousCell = this.enemySpatialGrid.get(previousKey);
+            const previousIndex = previousCell ? previousCell.indexOf(enemy) : -1;
+            if (previousIndex !== -1) previousCell.splice(previousIndex, 1);
+        }
+
+        let cell = this.enemySpatialGrid.get(key);
+        if (!cell) {
+            cell = [];
+            this.enemySpatialGrid.set(key, cell);
+        }
+        cell.push(enemy);
+        this.enemySpatialCellByEnemy.set(enemy, key);
+    }
+
+    getNearbyEnemies(x, z, radius) {
+        const nearby = this.nearbyEnemyBuffer;
+        nearby.length = 0;
+        const cellSize = this.enemySpatialCellSize;
+        const minCellX = Math.floor((x - radius) / cellSize);
+        const maxCellX = Math.floor((x + radius) / cellSize);
+        const minCellZ = Math.floor((z - radius) / cellSize);
+        const maxCellZ = Math.floor((z + radius) / cellSize);
+
+        for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+            for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+                const cell = this.enemySpatialGrid.get(`${cellX},${cellZ}`);
+                if (cell) {
+                    for (let i = 0; i < cell.length; i++) nearby.push(cell[i]);
+                }
+            }
+        }
+        nearby.sort((a, b) => this.enemySpatialIndices.get(a) - this.enemySpatialIndices.get(b));
+        return nearby;
+    }
+
     resolveCollisions(playerPos) {
         const level = this.navigation ? this.navigation.levelManager : null;
         const len = this.enemies.length;
@@ -158,17 +243,20 @@ export class EnemyManager {
             if (!enA.mesh || enA.lifeTime <= 0) continue;
             let rA = this.getEnemyRadius(enA);
             
-            for (let j = i + 1; j < len; j++) {
-                let enB = this.enemies[j];
+            const nearby = this.getNearbyEnemies(enA.mesh.position.x, enA.mesh.position.z, 4.5);
+            for (let n = 0; n < nearby.length; n++) {
+                let enB = nearby[n];
+                if (this.enemySpatialIndices.get(enB) <= i) continue;
                 if (!enB.mesh || enB.lifeTime <= 0) continue;
                 let rB = this.getEnemyRadius(enB);
                 
                 let dx = enA.mesh.position.x - enB.mesh.position.x;
                 let dz = enA.mesh.position.z - enB.mesh.position.z;
-                let dist = Math.hypot(dx, dz);
+                let distanceSquared = dx * dx + dz * dz;
                 let minDist = rA + rB;
                 
-                if (dist < minDist && dist > 0.0001) {
+                if (distanceSquared < minDist * minDist && distanceSquared > 0.00000001) {
+                    let dist = Math.sqrt(distanceSquared);
                     let overlap = minDist - dist;
                     let nx = dx / dist;
                     let nz = dz / dist;
@@ -199,6 +287,8 @@ export class EnemyManager {
                         if (!level || !level.checkWallCollision(newX, enB.mesh.position.z, rB)) enB.mesh.position.x = newX;
                         if (!level || !level.checkWallCollision(enB.mesh.position.x, newZ, rB)) enB.mesh.position.z = newZ;
                     }
+                    this.updateEnemySpatialGridEntry(enA);
+                    this.updateEnemySpatialGridEntry(enB);
                 }
             }
             
@@ -206,9 +296,10 @@ export class EnemyManager {
             if (playerPos) {
                 let pDx = enA.mesh.position.x - playerPos.x;
                 let pDz = enA.mesh.position.z - playerPos.z;
-                let pDist = Math.hypot(pDx, pDz);
+                let pDistanceSquared = pDx * pDx + pDz * pDz;
                 let hardDist = (enA.type === 'boss') ? 1.2 : (enA.type === 'tank' ? 0.75 : 0.5);
-                if (pDist < hardDist && pDist > 0.001) {
+                if (pDistanceSquared < hardDist * hardDist && pDistanceSquared > 0.000001) {
+                    let pDist = Math.sqrt(pDistanceSquared);
                     let pOverlap = hardDist - pDist;
                     let pNx = pDx / pDist;
                     let pNz = pDz / pDist;
@@ -216,6 +307,7 @@ export class EnemyManager {
                     let newZ = enA.mesh.position.z + pNz * pOverlap * 0.5;
                     if (!level || !level.checkWallCollision(newX, enA.mesh.position.z, rA)) enA.mesh.position.x = newX;
                     if (!level || !level.checkWallCollision(enA.mesh.position.x, newZ, rA)) enA.mesh.position.z = newZ;
+                    this.updateEnemySpatialGridEntry(enA);
                 }
             }
         }
@@ -498,12 +590,12 @@ export class EnemyManager {
         }
 
         const bodyRadius = bw / 2; 
-        const bodyHitbox = new THREE.Mesh(new THREE.CylinderGeometry(bodyRadius, bodyRadius, bh, 8), this.globalHitboxMat);
+        const bodyHitbox = new THREE.Mesh(this.getHitboxGeometry(bodyRadius, bh), this.globalHitboxMat);
         bodyHitbox.position.set(x + bx, by, z + bz); 
         bodyHitbox.frustumCulled = false; 
 
         const headRadius = hw / 2;
-        const headHitbox = new THREE.Mesh(new THREE.CylinderGeometry(headRadius, headRadius, hh, 8), this.globalHitboxMat);
+        const headHitbox = new THREE.Mesh(this.getHitboxGeometry(headRadius, hh), this.globalHitboxMat);
         headHitbox.position.set(x + hx, hy, z + hz); 
         headHitbox.frustumCulled = false;
 
@@ -916,11 +1008,13 @@ export class EnemyManager {
         }
 
         // Alap frissítés. A komplex mozgás logika és támadás külön hívható vagy itt bővíthető.
+        this.buildEnemySpatialGrid();
         for (let i = 0; i < this.enemies.length; i++) {
             const en = this.enemies[i];
             
             en.lifeTime -= delta;
             if (en.lifeTime <= 0) {
+                this.updateEnemySpatialGridEntry(en);
                 this.scene.remove(en.mesh); 
                 this.scene.remove(en.bodyHitbox); 
                 this.scene.remove(en.headHitbox); 
@@ -967,8 +1061,6 @@ export class EnemyManager {
                     en.mixer.update(delta);
                 }
             }
-
-            this.updateHitboxPositions(en);
 
             
             // Radar frissítés
@@ -1051,6 +1143,7 @@ export class EnemyManager {
                     en.mesh.position.x += mX;
                     en.mesh.position.z += mZ;
                     en.mesh.position.y = (en.groundY !== undefined) ? en.groundY : 0.42;
+                    this.updateEnemySpatialGridEntry(en);
                     
                     let targetAngle = Math.atan2(en.velocity.x, en.velocity.z);
                     let targetQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetAngle);
@@ -1297,7 +1390,7 @@ export class EnemyManager {
                     }
 
                     if (this.navigation) {
-                        let dir = this.navigation.getBestDirection(en, targetPos);
+                        let dir = this.navigation.getBestDirection(en, targetPos, delta);
                         let enemyRadius = this.getEnemyRadius(en);
                         if (en.type === 'boss' && (Math.abs(en.mesh.position.x) > 24.0 || Math.abs(en.mesh.position.z) > 24.0)) {
                             enemyRadius = 1.5;
@@ -1312,6 +1405,7 @@ export class EnemyManager {
                         if (!level || !level.checkWallCollision(en.mesh.position.x, en.mesh.position.z + mZ, enemyRadius)) {
                             en.mesh.position.z += mZ;
                         }
+                        this.updateEnemySpatialGridEntry(en);
                         en.mesh.position.y = (en.groundY !== undefined) ? en.groundY : ((en.type === 'crawler') ? 0.42 : ((en.type === 'runner') ? 0.12 : 0));
                         
                         let targetAngle = Math.atan2(dir.x, dir.z);
@@ -1390,7 +1484,7 @@ export class EnemyManager {
                     }
 
                     if (this.navigation) {
-                        let dir = this.navigation.getBestDirection(en, targetPos);
+                        let dir = this.navigation.getBestDirection(en, targetPos, delta);
                         let enemyRadius = this.getEnemyRadius(en);
                         let minPlayerDist = (en.type === 'boss') ? 1.4 : (en.type === 'tank' ? 0.9 : 0.65);
                         
@@ -1408,21 +1502,21 @@ export class EnemyManager {
                         // Szeparáció (egymás elkerülése és eltolása mozgás közben is, hogy ne folyjanak össze)
                         let sepX = 0, sepZ = 0;
                         if (en.type !== 'boss') { // A hatalmas Boss-t nem lökhetik el a kisebb zombik a falba
-                            for (let j = 0; j < this.enemies.length; j++) {
-                                if (i !== j) {
-                                    let other = this.enemies[j];
-                                    if (!other.mesh || other.lifeTime <= 0) continue;
-                                    let otherRadius = this.getEnemyRadius(other);
-                                    let desiredDist = (enemyRadius + otherRadius) * 1.25;
-                                    let dx = en.mesh.position.x - other.mesh.position.x;
-                                    let dz = en.mesh.position.z - other.mesh.position.z;
-                                    let d = Math.hypot(dx, dz);
-                                    if (d < desiredDist && d > 0.01) {
-                                        let factor = ((desiredDist - d) / desiredDist);
-                                        let mult = (other.type === 'boss') ? 3.0 : 1.5;
-                                        sepX += (dx / d) * factor * en.speed * delta * mult;
-                                        sepZ += (dz / d) * factor * en.speed * delta * mult;
-                                    }
+                            const nearby = this.getNearbyEnemies(en.mesh.position.x, en.mesh.position.z, 4.5);
+                            for (let j = 0; j < nearby.length; j++) {
+                                let other = nearby[j];
+                                if (other === en || !other.mesh || other.lifeTime <= 0) continue;
+                                let otherRadius = this.getEnemyRadius(other);
+                                let desiredDist = (enemyRadius + otherRadius) * 1.25;
+                                let dx = en.mesh.position.x - other.mesh.position.x;
+                                let dz = en.mesh.position.z - other.mesh.position.z;
+                                let distanceSquared = dx * dx + dz * dz;
+                                if (distanceSquared < desiredDist * desiredDist && distanceSquared > 0.0001) {
+                                    let distance = Math.sqrt(distanceSquared);
+                                    let factor = ((desiredDist - distance) / desiredDist);
+                                    let mult = (other.type === 'boss') ? 3.0 : 1.5;
+                                    sepX += (dx / distance) * factor * en.speed * delta * mult;
+                                    sepZ += (dz / distance) * factor * en.speed * delta * mult;
                                 }
                             }
                         }
@@ -1442,6 +1536,7 @@ export class EnemyManager {
                             if (!level || !level.checkWallCollision(en.mesh.position.x, nextZ, enemyRadius)) {
                                 en.mesh.position.z = nextZ;
                             }
+                            this.updateEnemySpatialGridEntry(en);
                         }
                         en.mesh.position.y = (en.groundY !== undefined) ? en.groundY : ((en.type === 'crawler') ? 0.42 : ((en.type === 'runner') ? 0.12 : 0));
                         
@@ -1466,6 +1561,7 @@ export class EnemyManager {
                     en.mesh.quaternion.slerp(targetQuat, delta * 6.0);
                 }
             }
+            this.updateEnemySpatialGridEntry(en);
         }
 
         // Ellenségek közötti és játékos elleni fizikai ütközés / szeparáció feloldása minden fázisban

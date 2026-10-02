@@ -20,6 +20,13 @@ class LevelManager {
 
         // Változó színű haladó aknalámpák (piros -> sárga -> zöld)
         this.shaftLightTiers = [];
+        this.shaftLensMat = null;
+        this.lastElevatorLightHex = 0xff1500;
+        this.lightFrustum = new THREE.Frustum();
+        this.lightProjectionMatrix = new THREE.Matrix4();
+        this.lightBounds = new THREE.Sphere(new THREE.Vector3(), 20);
+        this.dynamicLightCandidates = [];
+        this.maxActiveDynamicLights = 8;
 
         // Zsilipkapuk sűrű zöld füst áramlási állapota
         this.isDoorsOpen = false;
@@ -38,11 +45,15 @@ class LevelManager {
         this.gatesGroup = new THREE.Group();
         this.gatesGroup.visible = false;
         this.scene.add(this.gatesGroup);
+
+        // Alacsony teljesítményű gépeken a környezeti FX mérete csökkenthető a látvány megőrzése mellett.
+        this.lowPerformanceMode = !!(typeof navigator !== 'undefined' && navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
         this.wallHitboxes = [];
         this.corridorSpawns = [];
         this.doors = [];
         this.warningLights = [];
         this.shaftLightTiers = [];
+        this.dynamicLightCandidates = [];
         this.transitShutters = [];
         this.isDoorsOpen = false;
         this.smokeTickTimer = 0.0;
@@ -74,17 +85,26 @@ class LevelManager {
 
         // Zsilip alagút belső sűrű toxikus gőz textúrája és anyagai (lágy, gömbölyű hatás nélküli füstgőz)
         const smokeCanvas = document.createElement('canvas');
-        smokeCanvas.width = 256;
-        smokeCanvas.height = 256;
+        const smokeCanvasSize = this.lowPerformanceMode ? 128 : 256;
+        smokeCanvas.width = smokeCanvasSize;
+        smokeCanvas.height = smokeCanvasSize;
         const sCtx = smokeCanvas.getContext('2d');
-        const sGrad = sCtx.createRadialGradient(128, 128, 15, 128, 128, 126);
+        const smokeCanvasCenter = smokeCanvasSize / 2;
+        const sGrad = sCtx.createRadialGradient(
+            smokeCanvasCenter,
+            smokeCanvasCenter,
+            smokeCanvasSize * 0.06,
+            smokeCanvasCenter,
+            smokeCanvasCenter,
+            smokeCanvasCenter - 2
+        );
         sGrad.addColorStop(0, 'rgba(40, 245, 80, 0.98)');
         sGrad.addColorStop(0.3, 'rgba(28, 195, 60, 0.90)');
         sGrad.addColorStop(0.6, 'rgba(18, 140, 40, 0.65)');
         sGrad.addColorStop(0.85, 'rgba(8, 70, 20, 0.25)');
         sGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         sCtx.fillStyle = sGrad;
-        sCtx.fillRect(0, 0, 256, 256);
+        sCtx.fillRect(0, 0, smokeCanvasSize, smokeCanvasSize);
 
         const corridorSmokeTex = new THREE.CanvasTexture(smokeCanvas);
         corridorSmokeTex.wrapS = THREE.RepeatWrapping;
@@ -93,7 +113,7 @@ class LevelManager {
         this.corridorFogMat = new THREE.MeshBasicMaterial({
             map: corridorSmokeTex,
             transparent: true,
-            opacity: 0.96,
+            opacity: this.lowPerformanceMode ? 0.72 : 0.96,
             depthWrite: false,
             side: THREE.DoubleSide
         });
@@ -377,6 +397,8 @@ class LevelManager {
             const pLight = new THREE.PointLight(0xff1500, 0.9, 8);
             pLight.position.copy(lightMesh.position);
             this.gatesGroup.add(pLight);
+            const gateLight = { light: pLight, rangeSq: 64, distanceSq: Infinity, tier: null };
+            this.dynamicLightCandidates.push(gateLight);
 
             // D) ZSILIP ALAGÚT A FAL MÖGÖTT
             const corridorMidZ = isXAxis ? doorCenterZ + dirSign * (wallThick / 2 + corridorDepth / 2) : doorCenterZ;
@@ -466,6 +488,8 @@ class LevelManager {
             const lamp = new THREE.PointLight(0x22ff55, 1.8, 16);
             lamp.position.set(corridorMidX, 4.8, corridorMidZ);
             this.gatesGroup.add(lamp);
+            const corridorLight = { light: lamp, rangeSq: 256, distanceSq: Infinity, tier: null };
+            this.dynamicLightCandidates.push(corridorLight);
 
             // Ellenségek belépési / spawn pontja az alagút mélyén
             const spawnX = isXAxis ? doorCenterX : doorCenterX + dirSign * (wallThick / 2 + corridorDepth - 2.0);
@@ -526,9 +550,13 @@ class LevelManager {
             { x: 24.8,  z: -7.0, isX: false },
             { x: 24.8,  z: 7.0,  isX: false }
         ];
+        this.shaftLensMat = new THREE.MeshBasicMaterial({ color: 0xff1500 });
+        this.lastElevatorLightHex = 0xff1500;
 
         tierHeights.forEach((yPos) => {
-            const tierFixtures = [];
+            const tier = { y: yPos, fixtures: [] };
+            this.shaftLightTiers.push(tier);
+            const tierFixtures = tier.fixtures;
             lampPositions.forEach(lp => {
                 const group = new THREE.Group();
 
@@ -541,8 +569,7 @@ class LevelManager {
                 const lensGeo = lp.isX
                     ? new THREE.BoxGeometry(1.3, 0.18, 0.4)
                     : new THREE.BoxGeometry(0.4, 0.18, 1.3);
-                const lensMat = new THREE.MeshBasicMaterial({ color: 0xff1500 });
-                const lensMesh = new THREE.Mesh(lensGeo, lensMat);
+                const lensMesh = new THREE.Mesh(lensGeo, this.shaftLensMat);
                 group.add(lensMesh);
 
                 const light = new THREE.PointLight(0xff1500, 1.5, 20, 2);
@@ -556,11 +583,14 @@ class LevelManager {
                     lensMesh: lensMesh,
                     light: light
                 });
-            });
-
-            this.shaftLightTiers.push({
-                y: yPos,
-                fixtures: tierFixtures
+                const fixture = tierFixtures[tierFixtures.length - 1];
+                this.dynamicLightCandidates.push({
+                    light,
+                    fixture,
+                    tier,
+                    rangeSq: 400,
+                    distanceSq: Infinity
+                });
             });
         });
 
@@ -615,6 +645,7 @@ class LevelManager {
     // --- ZSILIPKAPU NYITÁS ÉS ZÁRÁS VEZÉRLÉS ---
     openDoors(duration = 7.5) {
         this.isDoorsOpen = true;
+        this.elevatorTransitTimer = 0;
         this.smokeTickTimer = 0.0;
         this.isElevatorMoving = false;
         this.elevatorSpeed = 0;
@@ -665,6 +696,44 @@ class LevelManager {
             if (d.pointLight) {
                 d.pointLight.color.setHex(0xff1500);
             }
+        }
+    }
+
+    updateLightVisibility(camera) {
+        if (!camera) return;
+
+        this.lightProjectionMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        this.lightFrustum.setFromProjectionMatrix(this.lightProjectionMatrix);
+
+        const cameraPosition = camera.position;
+        for (const candidate of this.dynamicLightCandidates) {
+            if (candidate.tier) {
+                const fixture = candidate.fixture;
+                this.lightBounds.center.set(fixture.group.position.x, candidate.tier.y, fixture.group.position.z);
+                if (!this.lightFrustum.intersectsSphere(this.lightBounds)) {
+                    candidate.distanceSq = Infinity;
+                    continue;
+                }
+                const dx = cameraPosition.x - this.lightBounds.center.x;
+                const dy = cameraPosition.y - this.lightBounds.center.y;
+                const dz = cameraPosition.z - this.lightBounds.center.z;
+                candidate.distanceSq = dx * dx + dy * dy + dz * dz;
+            } else if (this.gatesGroup.visible) {
+                const position = candidate.light.position;
+                const dx = cameraPosition.x - position.x;
+                const dy = cameraPosition.y - position.y;
+                const dz = cameraPosition.z - position.z;
+                const distanceSq = dx * dx + dy * dy + dz * dz;
+                candidate.distanceSq = distanceSq <= candidate.rangeSq ? distanceSq : Infinity;
+            } else {
+                candidate.distanceSq = Infinity;
+            }
+        }
+
+        this.dynamicLightCandidates.sort((a, b) => a.distanceSq - b.distanceSq);
+        for (let i = 0; i < this.dynamicLightCandidates.length; i++) {
+            const candidate = this.dynamicLightCandidates[i];
+            candidate.light.visible = i < this.maxActiveDynamicLights && Number.isFinite(candidate.distanceSq);
         }
     }
 
@@ -739,27 +808,27 @@ class LevelManager {
                     }
                 }
 
-                // Pozíció és fényforrás színének frissítése
+                // A fixture-ek mozognak, a közös fényanyag csak fázisváltáskor változik.
                 for (let f = 0; f < tier.fixtures.length; f++) {
                     const fix = tier.fixtures[f];
                     fix.group.position.y = tier.y;
-                    if (fix.lensMesh && fix.lensMesh.material) {
-                        fix.lensMesh.material.color.setHex(currentHex);
-                    }
-                    if (fix.light) {
-                        fix.light.color.setHex(currentHex);
-                    }
                 }
             }
 
-            // A zsilipkapuk kis jelzőfényei is követik a liftezés fázisait
-            for (let i = 0; i < this.warningLights.length; i++) {
-                const wl = this.warningLights[i];
-                if (wl.mesh && wl.mesh.material) {
-                    wl.mesh.material.color.setHex(currentHex);
+            if (currentHex !== this.lastElevatorLightHex) {
+                this.lastElevatorLightHex = currentHex;
+                this.shaftLensMat.color.setHex(currentHex);
+
+                for (const tier of this.shaftLightTiers) {
+                    for (const fixture of tier.fixtures) fixture.light.color.setHex(currentHex);
                 }
-                if (wl.light) {
-                    wl.light.color.setHex(currentHex);
+
+                // A zsilipkapuk jelzőfényei is követik a lift fázisait.
+                for (const warningLight of this.warningLights) {
+                    if (warningLight.mesh && warningLight.mesh.material) {
+                        warningLight.mesh.material.color.setHex(currentHex);
+                    }
+                    if (warningLight.light) warningLight.light.color.setHex(currentHex);
                 }
             }
         }
@@ -821,6 +890,11 @@ class LevelManager {
         }
     }
 
+    collisionBoxOverlapsAabb(box, minX, maxX, minZ, maxZ) {
+        return !(box.max.x < minX || box.min.x > maxX ||
+            box.max.y < 0 || box.min.y > 2 || box.max.z < minZ || box.min.z > maxZ);
+    }
+
     checkWallCollision(x, z, r) {
         // Ha a lift épp mozgásban van szintek között, a platform pereme (24.8m) abszolút biztonsági fal
         if (this.isElevatorMoving) {
@@ -828,14 +902,17 @@ class LevelManager {
                 return true;
             }
         }
-        const box = new THREE.Box3(new THREE.Vector3(x - r, 0, z - r), new THREE.Vector3(x + r, 2, z + r));
+        const minX = x - r;
+        const maxX = x + r;
+        const minZ = z - r;
+        const maxZ = z + r;
         for (let i = 0; i < this.wallHitboxes.length; i++) {
-            if (box.intersectsBox(this.wallHitboxes[i])) return true;
+            if (this.collisionBoxOverlapsAabb(this.wallHitboxes[i], minX, maxX, minZ, maxZ)) return true;
         }
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
             if (d.progress < 0.8 && !d.hitbox.isEmpty()) {
-                if (box.intersectsBox(d.hitbox)) return true;
+                if (this.collisionBoxOverlapsAabb(d.hitbox, minX, maxX, minZ, maxZ)) return true;
             }
         }
         return false;

@@ -9,12 +9,14 @@ class VFXManager {
         this.bloodPool = [];
         this.laserPool = [];
         this.activeSpurts = [];
+        this.freeBloodParticles = [];
         
         this.poolLaserMat = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 3 });
         this.sonicBooms = [];
         this.shockwaves = [];
         this.fogTexture = null;
         this.corridorSmokePuffs = [];
+        this.freeCorridorSmokePuffs = [];
         
         this.radSystem = null;
         this.fogSystem = null;
@@ -133,12 +135,33 @@ class VFXManager {
             blending: THREE.NormalBlending,
             alphaTest: 0.05
         });
+        this.freeBloodParticles = [];
         
         for (let i = 0; i < 400; i++) {
             let p = new THREE.Sprite(this.bloodMat.clone());
             p.visible = false;
             this.bloodGroup.add(p);
-            this.bloodParticles.push({ mesh: p, life: 0, vx: 0, vy: 0, vz: 0 });
+            const particle = { mesh: p, life: 0, vx: 0, vy: 0, vz: 0, inPool: true };
+            this.bloodParticles.push(particle);
+            this.freeBloodParticles.push(particle);
+        }
+    }
+
+    acquireBloodParticle() {
+        const particle = this.freeBloodParticles.pop();
+        if (particle) particle.inPool = false;
+        return particle || null;
+    }
+
+    resetBloodParticles() {
+        this.freeBloodParticles.length = 0;
+        for (const particle of this.bloodParticles) {
+            particle.life = 0;
+            particle.mesh.visible = false;
+            particle.mesh.material.blending = THREE.NormalBlending;
+            particle.mesh.scale.y = particle.mesh.scale.x;
+            particle.inPool = true;
+            this.freeBloodParticles.push(particle);
         }
     }
 
@@ -183,7 +206,7 @@ class VFXManager {
         if (!this.bloodParticles) return;
 
         for (let i = 0; i < count; i++) {
-            let p = this.bloodParticles.find(x => x.life <= 0);
+            let p = this.acquireBloodParticle();
             if (p) {
                 p.life = data.isBash ? 0.3 + Math.random() * 0.2 : (data.isPlant ? 1.0 : 0.8);
                 p.mesh.position.copy(data.position);
@@ -270,7 +293,7 @@ class VFXManager {
         }
         if (!this.bloodParticles || !data || !data.position) return;
         for (let i = 0; i < 3; i++) { 
-            let p = this.bloodParticles.find(x => x.life <= 0);
+            let p = this.acquireBloodParticle();
             if (p) {
                 p.life = 0.6;
                 p.mesh.position.set(
@@ -507,7 +530,7 @@ class VFXManager {
         if (!data || !data.position) return;
         let pos = data.position;
         for (let j = 0; j < 6; j++) {
-            let p = this.bloodParticles ? this.bloodParticles.find(part => part.life <= 0) : null;
+            let p = this.bloodParticles ? this.acquireBloodParticle() : null;
             if (p) {
                 p.life = 0.8;
                 p.mesh.material.color.setHex(0x00ffff);
@@ -532,7 +555,7 @@ class VFXManager {
         const pos = data.position;
         // 1. Zöld vér fröccsenés a sokkolt ellenfélből (ahogy a régi kód csinálta)
         for (let j = 0; j < 2; j++) {
-            let p = this.bloodParticles.find(part => part.life <= 0);
+            let p = this.acquireBloodParticle();
             if (p) {
                 p.life = 0.5;
                 p.mesh.material.color.setHex(0x55ff55);
@@ -552,7 +575,7 @@ class VFXManager {
         }
         // 2. Kékes-fehér izzó gőz pamacsok a zombi testéből
         for (let j = 0; j < 5; j++) {
-            let p = this.bloodParticles.find(part => part.life <= 0);
+            let p = this.acquireBloodParticle();
             if (p) {
                 p.life = 0.8;
                 p.mesh.material.color.setHex(0x00ffff);
@@ -666,17 +689,31 @@ class VFXManager {
         if (!this.scene || !this.fogTexture) return;
         if (this.corridorSmokePuffs.length >= 200) return;
 
-        // Pontosan a Nexus Node támadásának SpriteMaterial beállításai, zöld toxikus színnel
-        const puffMat = new THREE.SpriteMaterial({
-            map: this.fogTexture,
-            color: 0x22ff55,
-            transparent: true,
-            opacity: 0.85,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false
-        });
+        let puffData = this.freeCorridorSmokePuffs.pop();
+        if (!puffData) {
+            if (this.corridorSmokePuffs.length >= 200) return;
 
-        const puff = new THREE.Sprite(puffMat);
+            const puffMat = new THREE.SpriteMaterial({
+                map: this.fogTexture,
+                color: 0x22ff55,
+                transparent: true,
+                opacity: 0.85,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            const mesh = new THREE.Sprite(puffMat);
+            mesh.visible = false;
+            this.scene.add(mesh);
+            puffData = {
+                mesh,
+                direction: new THREE.Vector3(),
+                life: 0,
+                speed: 0,
+                growth: 0,
+                rotSpeed: 0
+            };
+        }
+        const puff = puffData.mesh;
 
         // Szétterülés a kapunyílás szélességében (5.0m mentén szórva)
         const lateralOffset = (Math.random() - 0.5) * 5.0;
@@ -691,7 +728,7 @@ class VFXManager {
         puff.position.set(posX, posY, posZ);
 
         // Kifelé mutató irányvektor, finom szóródással a nyaláb körül (Nexus Node stílus)
-        let pDir = new THREE.Vector3(gate.outX, 0.08, gate.outZ);
+        const pDir = puffData.direction.set(gate.outX, 0.08, gate.outZ);
         if (gate.isXAxis) {
             pDir.x += (Math.random() - 0.5) * 0.25;
             pDir.z += (Math.random() - 0.5) * 0.12;
@@ -705,16 +742,14 @@ class VFXManager {
         const initialScale = Math.random() * 1.5 + 2.0;
         puff.scale.set(initialScale, initialScale, 1);
 
-        this.scene.add(puff);
-
-        this.corridorSmokePuffs.push({
-            mesh: puff,
-            life: isBurst ? (Math.random() * 0.3 + 1.1) : (Math.random() * 0.3 + 0.85),
-            direction: pDir,
-            speed: isBurst ? (Math.random() * 4.0 + 8.0) : (Math.random() * 3.0 + 5.5),
-            growth: Math.random() * 6.0 + 5.0, // Erőteljes gőztágulás (Nexus boss érték)
-            rotSpeed: (Math.random() - 0.5) * 4.0 // Gyors turbulens forgás (Nexus boss érték)
-        });
+        puff.visible = true;
+        puffData.life = isBurst ? (Math.random() * 0.3 + 1.1) : (Math.random() * 0.3 + 0.85);
+        puffData.speed = isBurst ? (Math.random() * 4.0 + 8.0) : (Math.random() * 3.0 + 5.5);
+        puffData.growth = Math.random() * 6.0 + 5.0;
+        puffData.rotSpeed = (Math.random() - 0.5) * 4.0;
+        puffData.mesh.material.opacity = 0.85;
+        puffData.mesh.material.rotation = 0;
+        this.corridorSmokePuffs.push(puffData);
     }
 
     update(delta, camera) {
@@ -809,9 +844,14 @@ class VFXManager {
                     }
 
                     if (p.life <= 0) { 
+                        p.life = 0;
                         p.mesh.visible = false; 
                         p.mesh.material.blending = THREE.NormalBlending;
                         p.mesh.scale.y = p.mesh.scale.x; 
+                        if (!p.inPool) {
+                            p.inPool = true;
+                            this.freeBloodParticles.push(p);
+                        }
                     }
                 }
             }
@@ -828,7 +868,7 @@ class VFXManager {
                 while (spurt.dropTimer <= 0) {
                     spurt.dropTimer += 0.005; // 3x sűrűbb sugár!
                     
-                    let p = this.bloodParticles.find(part => part.life <= 0);
+                    let p = this.acquireBloodParticle();
                     if (p) {
                         p.life = 0.6; // Kicsit gyorsabban halványul el a levegőben
                         p.mesh.material.color.setHex(spurt.color);
@@ -892,7 +932,7 @@ class VFXManager {
                 let currentScale = sw.mesh.scale.x + (sw.growth * delta);
                 sw.mesh.scale.set(currentScale, currentScale, 1);
 
-                sw.mesh.position.add(sw.direction.clone().multiplyScalar(sw.speed * delta));
+                sw.mesh.position.addScaledVector(sw.direction, sw.speed * delta);
 
                 sw.mesh.material.rotation += sw.rotSpeed * delta;
                 sw.mesh.material.opacity = Math.max(0, sw.life * 0.8);
@@ -915,14 +955,14 @@ class VFXManager {
                 sw.mesh.scale.set(currentScale, currentScale, 1);
 
                 sw.speed = Math.max(0.6, sw.speed - delta * 3.5);
-                sw.mesh.position.add(sw.direction.clone().multiplyScalar(sw.speed * delta));
+                sw.mesh.position.addScaledVector(sw.direction, sw.speed * delta);
 
                 sw.mesh.material.rotation += sw.rotSpeed * delta;
                 sw.mesh.material.opacity = Math.max(0, sw.life * 0.85);
 
                 if (sw.life <= 0) {
-                    if (this.scene) this.scene.remove(sw.mesh);
-                    if (sw.mesh.material) sw.mesh.material.dispose();
+                    sw.mesh.visible = false;
+                    this.freeCorridorSmokePuffs.push(sw);
                     this.corridorSmokePuffs.splice(i, 1);
                 }
             }
@@ -946,19 +986,13 @@ class VFXManager {
         for (let i = 0; i < splatters.length; i++) {
             splatters[i].remove();
         }
-        if (this.bloodParticles) {
-            for (let p of this.bloodParticles) {
-                p.life = 0;
-                if (p.mesh) p.mesh.visible = false;
-            }
-        }
+        if (this.bloodParticles) this.resetBloodParticles();
     }
 
     updateMenu(delta) {
         if (this.radSystem) {
             this.radSystem.rotation.y += delta * 0.05;
         }
-        this.clearScreenBlood();
     }
 
     reset() {
@@ -971,26 +1005,23 @@ class VFXManager {
         }
         if (this.corridorSmokePuffs) {
             for (let p of this.corridorSmokePuffs) {
-                if (this.scene && p.mesh) this.scene.remove(p.mesh);
-                if (p.mesh && p.mesh.material) p.mesh.material.dispose();
+                p.mesh.visible = false;
+                this.freeCorridorSmokePuffs.push(p);
             }
             this.corridorSmokePuffs = [];
         }
         if (this.sonicBooms) {
             for (let b of this.sonicBooms) {
                 if (this.scene && b.mesh) this.scene.remove(b.mesh);
+                if (b.mesh && b.mesh.geometry) b.mesh.geometry.dispose();
+                if (b.mesh && b.mesh.material) b.mesh.material.dispose();
             }
             this.sonicBooms = [];
         }
         if (this.activeSpurts) {
             this.activeSpurts = [];
         }
-        if (this.bloodParticles) {
-            for (let p of this.bloodParticles) {
-                p.life = 0;
-                p.mesh.visible = false;
-            }
-        }
+        if (this.bloodParticles) this.resetBloodParticles();
         const screenBlood = document.getElementById('screen-blood');
         if (screenBlood) screenBlood.style.opacity = '0';
         this.isFrozen = false;

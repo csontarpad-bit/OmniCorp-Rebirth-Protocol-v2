@@ -81,9 +81,23 @@ export class Navigation {
         return true; 
     }
 
-    getBestDirection(enemy, playerPos) {
+    getBestDirection(enemy, playerPos, delta = 0) {
         let dir = new THREE.Vector3();
         let enemyPos = enemy.mesh.position;
+        enemy.navigationRefreshTimer = Math.max(0, (enemy.navigationRefreshTimer || 0) - delta);
+        const targetChanged = enemy.navigationTarget !== playerPos;
+        const targetMoved = !enemy.navigationTargetPosition ||
+            Math.hypot(playerPos.x - enemy.navigationTargetPosition.x, playerPos.z - enemy.navigationTargetPosition.z) > 1.0;
+
+        if (enemy.navigationRefreshTimer > 0 && !targetChanged && !targetMoved) {
+            const cachedTarget = enemy.currentWaypoint || playerPos;
+            return dir.subVectors(cachedTarget, enemyPos).setY(0).normalize();
+        }
+
+        enemy.navigationRefreshTimer = 0.2;
+        enemy.navigationTarget = playerPos;
+        if (!enemy.navigationTargetPosition) enemy.navigationTargetPosition = new THREE.Vector3();
+        enemy.navigationTargetPosition.set(playerPos.x, 0, playerPos.z);
         let distToPlayer = enemyPos.distanceTo(playerPos);
 
         // FÁZIS 1: Ha 3.5 méteren belül van (harci közelség), vagy tisztán látja a játékost:
