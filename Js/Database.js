@@ -1,26 +1,7 @@
-// Database.js - Statikus adatok és állapotok
-
-export function generateEnemyStatHTML(enemyType) {
-    if (!playerStats.kills[enemyType]) return "";
-    let body = playerStats.kills[enemyType].body;
-    let head = playerStats.kills[enemyType].head;
-    let total = body + head;
-    
-    let activeBoost = Math.floor(playerStats.uploadedDataPackets * 5); // %-ban
-    let pending = playerStats.pendingDataPackets;
-    
-    return `<div style="display: flex; justify-content: space-between; align-items: center; height: 100%; font-size: 14px; line-height: 1.2;">
-                <div style="flex: 1; text-align: left; padding-right: 10px; border-right: 1px solid #005555;">
-                    <div style="color:#00ffff; margin-bottom: 5px;">NEURÁLIS SZINKRON:<br><span style="color:#fff; font-weight:bold; font-size:16px;">LVL ${playerStats.uploadedDataPackets}</span></div>
-                    <div style="color:#ffaa00;">HARCI OPTIMALIZÁCIÓ:<br><span style="color:#fff; font-weight:bold; font-size:16px;">+${activeBoost}% SEBZÉS</span></div>
-                </div>
-                <div style="flex: 1; text-align: right; padding-left: 10px;">
-                    <div style="color:#aaa; margin-bottom: 5px; font-size:11px;">(Szerveren várakozó adatok: <span style="color:#ffcc00;">${pending} db</span>)</div>
-                    <div style="color:#888; margin-bottom: 2px;">TESTLÖVÉS: <span style="color:#fff;">${body}</span></div>
-                    <div style="color:#ff0000; margin-bottom: 2px;">FEJLÖVÉS: <span style="color:#fff; font-weight:bold;">${head}</span></div>
-                </div>
-            </div>`;
-}
+// Database.js - Statikus játékadatok.
+import { playerStats } from './RuntimeState.js';
+export { playerStats, loadPlayerStats, savePlayerStats, getResearchLevel, getDamageBoost } from './RuntimeState.js';
+export { generateEnemyStatHTML } from './UITemplates.js';
 
 export const weapons = {
     melee: { name: 'Taktikai Kés', level: 1, damage: 0.5, ammo: Infinity, reserve: Infinity, maxAmmo: Infinity, maxReserve: Infinity, pellets: 1, spread: 0, reloadTime: 0, owned: true, auto: false, fireRate: 0, image: "" },
@@ -201,7 +182,7 @@ export const OmniCorpDatabase = {
             unlocked: false,
             checkUnlock: () => (typeof currentWave !== 'undefined' && currentWave >= 100) || playerStats.wavesSurvived >= 100,
             requirementText: "KÖVETELMÉNY: Pusztítsa el a Nexust (100. Hullám).",
-            statInfo: () => `<div style="text-align:center; color:#ff0000; font-weight:bold;">INCIDENS LEZÁRVA<br>VESZTESÉG: 100%</div>`,
+            statInfo: 'incident_closed',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/25d9afc7ab2489c689298e9c7aee89b8c8d45fee/OmniCorp.jpeg", 
             audio: "audio_log_end.mp3",
             text: "KRONOS RENDSZERMAG: ALFA-CÉLPONT MEGSEMMISÍTVE. BIOMASSZA SZINT CSÖKKEN.\n\nECHO-001. A telemetriai adatok gyűjtése befejeződött. Az OmniCorp megkapta a kért fájlokat. A biológiai fenyegetés hálózata összeomlott.\n\nSzenzorok elemzése: ECHO-001 biológiai hardver. A szervezet 94%-a Verdant spórával fertőzött. A klónozó laborok megsemmisültek. Szintetikus alany megmentése: Nem indokolt.\n\nMegtetted, amire Gallagher programozott. Elpusztítottad a Magot. De te is tudod, mi következik. Ha felmész a felszínre, a Kaptár a te véredben születik újjá. Gallagher utolsó ajándéka a túlterhelési kód volt, amelyet a kulcsával együtt hagyott hátra. A visszaszámlálás elindult. A Terminus Állomás másodperceken belül hamuvá ég, vele együtt a gomba, a telemetria, én... és te is.\n\nKRONOS Rendszer leállítása... Köszönjük, hogy az OmniCorp-ot választotta."
@@ -214,7 +195,7 @@ enemies: [
             title: "VERDANT HOST (FERTŐZÖTT BÁNYÁSZ)",
             requirementText: "FELOLDÁS: Iktasson ki 1 Host mutánst.",
             checkUnlock: () => (playerStats.kills.normal.body + playerStats.kills.normal.head) >= 1,
-            statInfo: () => generateEnemyStatHTML('normal'),
+            statInfo: 'normal',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/dd18736e2a98348222a8ad07c6e46b91c490f56c/MUT%C3%81NS%20KUTAT%C3%93.jpeg", 
             text: "KRONOS ELEMZÉS: A bázis eredeti ECHO bányász-klónjai. A Verdant spóra lekapcsolta a fájdalomérzetüket, a gombafonalak pedig bábként rángatják a nekrotikus izomzatot.\n\nGALLAGHER MEGJEGYZÉSE: \"Ne habozz meghúzni a ravaszt, ECHO. Ezek a te régi 'testvéreid', de már hetek óta halottak. A Vállalat csak üres munkagépnek használta őket, most pedig a gomba rángatja a testüket. Célozz a fejre, hogy megszakítsd az idegi kapcsolatukat a Kaptárral!\""
         },
@@ -223,7 +204,7 @@ enemies: [
             title: "VERDANT LEAPER (BUKOTT FELDERÍTŐ)",
             requirementText: "FELOLDÁS: Iktasson ki 1 Leaper mutánst.",
             checkUnlock: () => (playerStats.kills.runner.body + playerStats.kills.runner.head) >= 1,
-            statInfo: () => generateEnemyStatHTML('runner'),
+            statInfo: 'runner',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/c683b09b77b21e5f471c59622e65ddaeddd39541/runner.jpeg",
             text: "KRONOS ELEMZÉS: Hiper-metabolizmussal rendelkező mutáns. Az alany gerincében OmniCorp 'Spinal Accelerator' (Gerinc-gyorsító) implantátum található.\n\nGALLAGHER MEGJEGYZÉSE: \"Ezek voltak a mélyszinti felderítő klónjaink. A Cég telerakta a gerincüket szintetikus adrenalin-pumpákkal, hogy bírják a tempót a sötétben. A gomba rácsatlakozott az implantátumra, és teljesen kiiktatta a biológiai korlátokat. Az idegrendszerük szó szerint lángol a túlterheléstől. Gyorsak, de törékenyek!\""
         },
@@ -232,7 +213,7 @@ enemies: [
             title: "VERDANT JUGGERNAUT (NEHÉZRAKODÓ)",
             requirementText: "FELOLDÁS: Iktasson ki 1 Juggernaut mutánst.",
             checkUnlock: () => (playerStats.kills.tank.body + playerStats.kills.tank.head) >= 1,
-            statInfo: () => generateEnemyStatHTML('tank'),
+            statInfo: 'tank',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/c683b09b77b21e5f471c59622e65ddaeddd39541/tank.jpeg",
             text: "KRONOS ELEMZÉS: Extrém csontsűrűséggel rendelkező anomália. Közeli fizikai kontaktus kerülendő. Páncéltörő fegyverzet javasolt.\n\nGALLAGHER MEGJEGYZÉSE: \"Ők voltak a teherhordók. Hogy elbírják a bányászgépeket, a Vállalat telepumpálta a csontvázukat 'Tissue Densifier' (Szövet-tömörítő) géllel. A gomba reakcióba lépett a géllel, és megállíthatatlan, kőkemény hústoronnyá növesztette őket. A sima pisztolylőszer alig sebzi. Használj sörétest, és maradj távol tőlük!\""
         },
@@ -241,7 +222,7 @@ enemies: [
             title: "VERDANT PHANTOM (STALKER)",
             requirementText: "FELOLDÁS: Iktasson ki 1 Phantom mutánst.",
             checkUnlock: () => (playerStats.kills.stalker.body + playerStats.kills.stalker.head) >= 1,
-            statInfo: () => generateEnemyStatHTML('stalker'),
+            statInfo: 'stalker',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/c683b09b77b21e5f471c59622e65ddaeddd39541/hider.jpeg",
             text: "KRONOS ELEMZÉS: Kromatofóra-enzimmel rendelkező mutáns, képes megtörni a fényt a teste körül.\n\nGALLAGHER MEGJEGYZÉSE: \"Figyelj a mozgásérzékelőre! Nem tudom, honnan szedte a Kaptár ezt a mutációt, valószínűleg a mélyben élő ősi létformákból vette át az álcázás képességét. Vadásznak rád. Ha hallod a nedves cuppogást a sötétben, már mögötted vannak.\""
         },
@@ -250,7 +231,7 @@ enemies: [
             title: "GOLDEN ANOMALY (LOGISZTIKAI DRÓN)",
             requirementText: "FELOLDÁS: Iktasson ki 1 Golden Anomáliát.",
             checkUnlock: () => (playerStats.kills.crawler.body + playerStats.kills.crawler.head) >= 1,
-            statInfo: () => generateEnemyStatHTML('crawler'),
+            statInfo: 'crawler',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/c683b09b77b21e5f471c59622e65ddaeddd39541/crawler.jpeg",
             text: "KRONOS ELEMZÉS: Magas sűrűségű genetikai transzport-egység. Az anomália extrém koncentrációjú, érintetlen neuro-szövetet raktároz.\n\nGALLAGHER MEGJEGYZÉSE: \"Ezek a kis mocskok a Kaptártudat hordárjai. Emberi fejekből és pókszerű végtagokból álltak össze. Azért nem támadnak rád, mert a feladatuk a rothadó, sárga pocsolyákból kinyerni a neuro-szövetet, és levinni a Maghoz. Ebből az építőanyagból hozza létre a Nexus a Juggernautokat. Lődd le őket, ECHO! A KRONOS rendszer megőrül a tiszta biológiai mintákért, és masszív Kredit-bónuszt ad érte!\""
         },
@@ -259,7 +240,7 @@ enemies: [
             title: "NEXUS-NODE (VÉDELMI CSOMÓPONT)",
             requirementText: "FELOLDÁS: Iktasson ki 1 Nexus-Node mutánst.",
             checkUnlock: () => (playerStats.kills.boss.body + playerStats.kills.boss.head) >= 1,
-            statInfo: () => generateEnemyStatHTML('boss'),
+            statInfo: 'boss',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/c683b09b77b21e5f471c59622e65ddaeddd39541/mini%20boss.jpeg",
             text: "KRONOS ELEMZÉS: A Kaptártudat lokális védekező csomópontja. Extrém fizikai erő, masszív regeneráció és hang-alapú neuro-sokk támadás jellemzi.\n\nGALLAGHER MEGJEGYZÉSE: \"Ezeket a góliátokat a Nexus kifejezetten a KRONOS Szervertermek védelmére hozta létre. Több áldozat összefonódott testéből állnak. Náluk vannak azok a fizikai hozzáférési kulcsok, amikkel kinyithatod az ajtókat a következő lift-aknához. Az ordításuk sűrített spóra-lökés, ha eltalál pillanatok alatt meghalsz. Fagyaszd le, és ürítsd bele a tárat!\""
         },
@@ -268,7 +249,7 @@ enemies: [
             title: "THE NEXUS (KAPTÁRTUDAT)",
             requirementText: "FELOLDÁS: Érje el a 100. Hullámot (A Magot).",
             checkUnlock: () => (typeof currentWave !== 'undefined' && currentWave >= 100) || playerStats.wavesSurvived >= 99, 
-            statInfo: () => generateEnemyStatHTML('alpha'),
+            statInfo: 'alpha',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/25d9afc7ab2489c689298e9c7aee89b8c8d45fee/alpha.jpeg",
             text: "KRONOS ELEMZÉS: A fertőzés abszolút magja. A Verdant spóra kritikus tömeg elérésekor létrehozott, központi idegrendszerként funkcionáló biológiai csomópont. A célpont kiiktatása a teljes kaptárhálózat összeomlását eredményezi.\n\nGALLAGHER MEGJEGYZÉSE: \"Ez nem egy sima mutáns, ECHO. Ez maga a hálózat. Több ezer bányász, kutató és klón összefonódott idegrendszere, ami a létesítmény geotermikus magjára tapadt rá. Ez adja neki az energiáját. Ha a közelébe érsz, a puszta mérete és a levegőben lévő spórakoncentráció megzavarja az érzékszerveidet. Légy taktikus. De ne hagyd túl sokáig élni!\""
         }
@@ -280,7 +261,7 @@ enemies: [
             title: "BIOMASSZA: ZÖLD FÁZIS (FRISS)",
             requirementText: "FELOLDÁS: Élje túl az 1. hullámot.",
             checkUnlock: () => (typeof currentWave !== 'undefined' && currentWave >= 1) || playerStats.wavesSurvived >= 1,
-            statInfo: () => `<div style="text-align:center;">VÉDELMI POTENCIÁL: 20% PAJZS</div>`,
+            statInfo: 'shield_green',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/25d9afc7ab2489c689298e9c7aee89b8c8d45fee/Z%C3%B6ld%20pocsolya.jpeg",
             text: "KRONOS ELEMZÉS: Kiiktatott mutánsokból származó, magas koncentrációjú, gélesedő testfolyadék. A benne lévő szerves maradványok rendkívül reaktívak. Élő emberi szövettel érintkezve azonnali korrozív roncsolást okoz. Ugyanakkor a Verdant-hordozók testére azonnal rátapad, gyorsan megköt, és 20%-os kinetikus sebzéscsökkentő pajzsot biztosít számukra.\n\nGALLAGHER MEGJEGYZÉSE: \"Ez a dögök vére, ECHO. Ne állj bele, mert pillanatok alatt átmarja a kevlár csizmádat. Viszont amint a mutánsok rálépnek, a gél rátapad a lábukra és extra páncélként viselkedik rajtuk. Ha teheted, vedd meg a Terminálon a Sterilizálás protokollt, és égesd le a platformról, mielőtt túl sok gyűlik össze!\""
         },
@@ -289,7 +270,7 @@ enemies: [
             title: "BIOMASSZA: SÁRGA FÁZIS (ROTHADÓ)",
             requirementText: "FELOLDÁS: Élje túl a 4. hullámot.",
             checkUnlock: () => (typeof currentWave !== 'undefined' && currentWave >= 4) || playerStats.wavesSurvived >= 4,
-            statInfo: () => `<div style="text-align:center;">VÉDELMI POTENCIÁL: 50% PAJZS</div>`,
+            statInfo: 'shield_yellow',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/25d9afc7ab2489c689298e9c7aee89b8c8d45fee/s%C3%A1rga%20pocsolya.jpeg",
             text: "KRONOS ELEMZÉS: A biomassza bomlási (rothadó) fázisa. A gél toxicitása drasztikusan megnő. A mutánsokra tapadva már 50%-os sebzéscsökkentő pajzsot képez. A kibocsátott feromonok a Logisztikai Drónokat vonzzák a területre.\n\nGALLAGHER MEGJEGYZÉSE: \"A liften lefelé egyre többet fogsz ebből látni, ahogy közeledünk a Béta szektorhoz. A zöld gél elkezdett rohadni. Ez a sárga cucc már 50%-kal tompítja a lövedékeidet, és az iszonyatos bűze odavonzza a Crawlereket. Kerüld el, mert a savas hatása is sokkal durvább, mint a friss zöld véré!\""
         },
@@ -298,7 +279,7 @@ enemies: [
             title: "BIOMASSZA: VÖRÖS FÁZIS (KRITIKUS)",
             requirementText: "FELOLDÁS: Élje túl a 6. hullámot.",
             checkUnlock: () => (typeof currentWave !== 'undefined' && currentWave >= 6) || playerStats.wavesSurvived >= 6,
-            statInfo: () => `<div style="text-align:center;">VÉDELMI POTENCIÁL: 80% PAJZS</div>`,
+            statInfo: 'shield_red',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/25d9afc7ab2489c689298e9c7aee89b8c8d45fee/v%C3%B6r%C3%B6s%20pocsolya.jpeg",
             text: "KRONOS ELEMZÉS: A sejtburjánzás elérte a kritikus tömeget. A gél megszilárdulása a mutánsokon szinte áttörhetetlen, 80%-os védelmet biztosít. A pocsolyában lévő sejtek replikációs fázisba lépnek, mutáció kialakulása várható.\n\nGALLAGHER MEGJEGYZÉSE: \"Az Omega szektor felé közeledve a gomba teljesen bevadul. A vörös pocsolyák 80%-os páncélt adnak a dögöknek. Sörétes vagy a Nehéz Revolver nélkül esélyed sincs átlőni rajta! De ami még rosszabb: a gélben lévő szerves maradványok elkezdenek lüktetni. Ha meglátod, hogy a vörös massza pulzál, tudd, hogy valami ki akar kelni belőle!\""
         },
@@ -307,7 +288,7 @@ enemies: [
             title: "ANOMÁLIA: FLESH TRAP (HÚS-CSAPDA)",
             requirementText: "FELOLDÁS: Éljen túl egy Mutációt vagy pusztítson el egyet.",
             checkUnlock: () => (typeof currentWave !== 'undefined' && currentWave >= 7) || playerStats.plantsDestroyed >= 1,
-            statInfo: () => `<div style="text-align:center;">MEGSEMMISÍTETT PÉLDÁNYOK: ${typeof playerStats !== 'undefined' ? playerStats.plantsDestroyed : 0} db</div>`,
+            statInfo: 'plant',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/25d9afc7ab2489c689298e9c7aee89b8c8d45fee/mutalodott%20noveny.jpeg",
             text: "KRONOS ELEMZÉS: Vörös biomasszák összefonódásából létrejött, statikus védekező/reprodukciós góc. Közelítés esetén heves biológiai detonációt hajt végre, neuro-toxikus felhőt robbantva a levegőbe.\n\nGALLAGHER MEGJEGYZÉSE: \"A vörös gélből kel ki. Ez már nem csak egy pocsolya, hanem egy biológiai akna. Ha túl közel mész, kipukkan, a benne lévő neuro-toxin pedig azonnal a véráramodba jut. Elvakít, durva hallucinációkat okoz és lassan felemészt. Lődd ki távolról, mielőtt megközelítenéd!\""
         }
@@ -318,7 +299,7 @@ enemies: [
             title: "SCAVENGER PISZTOLY",
             requirementText: "FELOLDÁS: Alapértelmezett felszerelés.",
             checkUnlock: () => true,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof weapons !== 'undefined' ? weapons.pistol.level : 1} / 5. SZINT</div>`,
+            statInfo: 'weapon_pistol',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/45abc3b3555b01cf93886d8560800ff7f3c5871c/pisztoly.png",
             text: "KRONOS ELEMZÉS: Standard biztonsági maroklőfegyver. Az eszköz belső szerkezetének fejlesztését a Vállalati Ipari Nyomtató kizárólag a megfelelő mennyiségű harci adat feltöltése után engedélyezi.\n\nGALLAGHER MEGJEGYZÉSE: \"Ezt találtam neked a biztonsági szekrényekben a klónozó labor mellett. Karcos, vérfoltos... az egyik egykori őr fegyvere volt. Lődd fejbe a dögöket, ahhoz elég lesz. Ahogy küldöd a telemetriát a gépnek, a lift falán lévő mini-nyomtatóból lőszert tudsz hozzá kérni ereszkedés közben. De a fejlesztésével meg kell várnod, amíg eléred az R&D laborokat.\""
         },
@@ -327,7 +308,7 @@ enemies: [
             title: "OMNICORP SÖRÉTES PUSKA",
             requirementText: "FELOLDÁS: Vásárolja meg a Terminálon.",
             checkUnlock: () => playerStats.weaponsBought.shotgun,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof weapons !== 'undefined' ? weapons.shotgun.level : 1} / 5. SZINT</div>`,
+            statInfo: 'weapon_shotgun',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/45abc3b3555b01cf93886d8560800ff7f3c5871c/sz%C3%B6r%C3%A9tes.png",
             text: "KRONOS ELEMZÉS: Közeli tömegoszlató kinetikus fegyver. Az alapmodell és a finommechanikai fejlesztések (szintlépések) kizárólag a Kutató és Fejlesztő szintek magas kapacitású nyomtatóiból szintetizálhatók.\n\nGALLAGHER MEGJEGYZÉSE: \"A teherlift kis terminálja ilyet nem tud nyomtatni. Ha túléled a menetet az első R&D laborig, ott a fegyverzeti részlegen már le tudod gyártani ezt. Közelről lerobbantja róluk a biomasszát. Ne sajnáld rá a kreditet a laborban, a masszívabb dögök ellen szükséged lesz a fejlesztésekre.\""
         },
@@ -336,7 +317,7 @@ enemies: [
             title: "OMNICORP GÉPKARABÉLY",
             requirementText: "FELOLDÁS: Vásárolja meg a Terminálon.",
             checkUnlock: () => playerStats.weaponsBought.rifle,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof weapons !== 'undefined' ? weapons.rifle.level : 1} / 5. SZINT</div>`,
+            statInfo: 'weapon_rifle',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/df39681a8668bd04e80660051e5755ff31995ba7/g%C3%A9gkarab%C3%A9ly.png",
             text: "KRONOS ELEMZÉS: Nagy tűzgyorsaságú rohamkarabély, folyamatos terület-elnyomásra tervezve. Az adatbázisban tárolt tervrajz a Béta szektor ipari körülményeire lett kalibrálva.\n\nGALLAGHER MEGJEGYZÉSE: \"A Béta szektorban már erre lesz szükséged. A pajzsos rohadékok ellen a pisztoly semmit sem ér. Ez az a fegyvertípus, amivel a Béta részleg őrsége próbálta feltartóztatni a rajzást. Ha eléred a labor megállót, nyomtasd ki, fejleszd fel a kapacitását, és csak nyomd hosszan a ravaszt.\""
         },
@@ -345,7 +326,7 @@ enemies: [
             title: "NEHÉZ REVOLVER",
             requirementText: "FELOLDÁS: Vásárolja meg a Terminálon.",
             checkUnlock: () => playerStats.weaponsBought.super,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof weapons !== 'undefined' ? weapons.super.level : 1} / 5. SZINT</div>`,
+            statInfo: 'weapon_super',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/df39681a8668bd04e80660051e5755ff31995ba7/revolver.png",
             text: "KRONOS ELEMZÉS: Titkosított tisztikari fegyver, extrém kaliberű páncéltörő lőszerrel. Eredetileg a fellázadó, vagy meghibásodott bányász-klónok likvidálására tervezték.\n\nGALLAGHER MEGJEGYZÉSE: \"A Vállalat tudta, mit csinál, amikor telepumpálta a klónokat csontsűrítő géllel. Ha egy nagydarab klón megőrül odalent, a normál őrség pisztolyai semmit sem érnek ellene. Ezt a fegyvert és az extrém kaliberű lőszert kifejezetten a klónok kivégzésére tervezték, még az Incidens előtt. Ezt a tervrajzot én magam töltöttem fel a KRONOS adatbázisába. Amint megszerzed az első szerverkulcsot, a rendszer engedélyezi a nyomtatását az R&D laborokban. Ez átmegy minden védelmen, de a szintetizálása méregdrága. Kezdd el a fejlesztését amint tudod. Kérlek... fejezd be a munkát.\""
         },
@@ -354,7 +335,7 @@ enemies: [
             title: "AUGMENTÁCIÓ: TISSUE DENSIFIER (SZÖVET-TÖMÖRÍTŐ)", 
             requirementText: "FELOLDÁS: Vásárolja meg a képességet a Terminálon.",
             checkUnlock: () => playerStats.skillsBought >= 1,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof skills !== 'undefined' ? skills.maxHealth.level : 0} / 5. SZINT</div>`,
+            statInfo: 'skill_maxHealth',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/6ff41de37442c16e94662d821116944b11451530/skill_kevlar.jpeg",
             text: "Vizuális Megjelenés: Egy félelmetes, pneumatikus csontba fúró pisztoly, nyomásálló üvegtartályában ipari cementre emlékeztető 'kalcifikáló géllel'. A gélben apró, megkövesedett gombaspórák lebegnek.\n\nGALLAGHER: \"Tudom, hogy fájdalmas, ECHO. A gél erőszakosan sűríti a csontjaidat. De meg kell csinálnod! Különben darabokra tépnek lent. Csak... ha meghalsz vele, te is Juggernauttá változol. Igyekezz életben maradni.\"" 
         },
@@ -363,7 +344,7 @@ enemies: [
             title: "AUGMENTÁCIÓ: SPINAL ACCELERATOR (GERINC-GYORSÍTÓ)",
             requirementText: "FELOLDÁS: Vásárolja meg a képességet a Terminálon.",
             checkUnlock: () => playerStats.skillsBought >= 1,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof skills !== 'undefined' ? skills.speed.level : 0} / 5. SZINT</div>`,
+            statInfo: 'skill_speed',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/6ff41de37442c16e94662d821116944b11451530/skill_legs.jpeg",
             text: "Vizuális Megjelenés: Masszív fém implantátum, ipari fém kampókkal, amelyek egyenesen a csigolyákba fúródnak. A KRONOS a Verdant parazita kapcsolódási módszerét integrálta a hardverbe.\n\nGALLAGHER: \"A gép rögzíti a hátadhoz. A csövekben szintetikus adrenalin van. Szörnyű látvány, de ettől gyorsabb leszel, mint a Leaperek. Emlékezz: ők is pont ettől a modultól lettek olyanok...\""
         },
@@ -372,7 +353,7 @@ enemies: [
             title: "FELSZERELÉS: TAKTIKAI LŐSZER-RÖGZÍTŐ",
             requirementText: "FELOLDÁS: Vásárolja meg a képességet a Terminálon.",
             checkUnlock: () => playerStats.skillsBought >= 1,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof skills !== 'undefined' ? skills.ammoLoot.level : 0} / 5. SZINT</div>`,
+            statInfo: 'skill_ammoLoot',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/6ff41de37442c16e94662d821116944b11451530/skill_pockets.jpeg",
             text: "KRONOS ELEMZÉS: Moduláris mágneses sínrendszer. Standard biztonsági felszerelés a Terminus Állomás fegyveres emberi személyzete számára. Növeli a hordozható kinetikus lőszer kapacitását.\n\nGALLAGHER MEGJEGYZÉSE: \"Ezt a modult kizárólag a biztonsági őrség használta, a bányász-klónok számára a tervrajz titkosítva volt. A vezérlőből feloldottam neked a hozzáférést a KRONOS adatbázisában. Vedd meg az engedélyt, nyomtasd ki a tartókat a laborban, és rögzítsd a páncélodra. Így sokkal több lőszert vihetsz magaddal az ereszkedés során.\""
         },
@@ -381,7 +362,7 @@ enemies: [
             title: "AUGMENTÁCIÓ: GS PORT (GEN-STAB DOKKOLÓ)",
             requirementText: "FELOLDÁS: Vásárolja meg a képességet a Terminálon.",
             checkUnlock: () => playerStats.skillsBought >= 1,
-            statInfo: () => `<div style="text-align:center;">AKTUÁLIS FEJLETTSÉG: ${typeof skills !== 'undefined' ? skills.healthLoot.level : 0} / 5. SZINT</div>`,
+            statInfo: 'skill_healthLoot',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/47635c6ad10aaa1e3920b7eb8bb4aaee47e00e6b/Pictures/08.jpg",
              text: "KRONOS ELEMZÉS: Az alkarba integrált orvosi aljzat, amely fokozza a sejt-szintű regenerációt a gyógyszerek befogadásakor. A Verdant-alapú regenerációs szérummal kompatibilis.\n\nGALLAGHER MEGJEGYZÉSE: \"A gép ezt 'szimbiózisnak' hívja, de valójában egy ajtót nyitsz a Kaptárnak a testedbe. Megnöveli a gyógyítást, de a Gen-Stab alapja maga a spóra-gél. Minden alkalommal, amikor belovod magadba, a fertőzés egy kicsit jobban átveszi az irányítást. Lassan felemészt. Az R&D laborokban drága pénzért kimosathatod a véredből, de a liftben erre nincs esélyed. Csak akkor használd, ha muszáj!\""
         },
@@ -390,7 +371,7 @@ enemies: [
             title: "MODUL: AUTOMATA DEFIBRILLÁTOR",
             requirementText: "FELOLDÁS: Vásárolja meg a képességet a Terminálon.",
             checkUnlock: () => playerStats.skillsBought >= 1,
-            statInfo: () => `<div style="text-align:center;">RAKTÁRON LÉVŐ MODUL: ${typeof skills !== 'undefined' ? skills.revive.level : 0} DB</div>`,
+            statInfo: 'skill_revive',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/6ff41de37442c16e94662d821116944b11451530/skill_revive.jpeg",
             text: "KRONOS ELEMZÉS: A szívizomzathoz rögzített ipari kondenzátor, amely fatális trauma esetén kényszerített újraindítást végez. Szabvány bányászati hardver az ECHO egységek munkaidejének és hatékonyságának maximalizálására. A magas feszültségű kisülés képes a biológiai kórokozók részleges termikus roncsolására a véráramban.\n\nGALLAGHER MEGJEGYZÉSE: \"Az OmniCorp azért építette ezt a klónokba, hogy egy halálos baleset után ne kelljen újat gyártani, hanem a régi még hasznos maradjon. Ha leáll a szíved, a modul egy brutális elektromos sokkal újraindítja. A kisülés szó szerint megégeti a húsodat belülről. A perzselt sejtek szaga egy-két másodpercre megzavarja a mutánsokat, mert a Kaptár azt hiszi, már halott vagy. De van egy váratlan előnye is: az áramütés kiégeti a véráramodból a spórák egy részét. \n\nA probléma az, hogy a Vállalat letiltotta az ingyenes újratöltést. A kondenzátor maximum 3 löketet bír el, utána beég. A terminálon fizetned kell a gépnek, hogy a diagnosztikai rendszerein keresztül feltöltse és újrakalibrálja a mellkasodban lévő modult egy újabb használathoz.\""
         },
@@ -399,7 +380,7 @@ enemies: [
             title: "HACK: CRYO-OVERRIDE",
             requirementText: "FELOLDÁS: Vásárolja meg a hozzáférést a Terminálon.",
             checkUnlock: () => playerStats.skillsBought >= 1,
-            statInfo: () => `<div style="text-align:center;">LICENC SZINT:<br>${typeof skills !== 'undefined' ? skills.freeze.level : 0} / 5. SZINT</div>`,
+            statInfo: 'skill_freeze',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/9807e89295cfc8f0ba0b95ab93aaa0180b8b8d41/cryo.jpeg", 
             text: "KRONOS ELEMZÉS: Központi klímaszabályozó rendszer. Illetéktelen beavatkozás észlelve.\n\nGALLAGHER MEGJEGYZÉSE: \"Feltörtem a klímarendszert! Ha kifizeted a licenszet az R&D laborban, rá tudsz csatlakozni a PDA-dról, és túlterhelheted a lift hűtőszelepeit. Folyékony nitrogént fog okádni a dögökre. Az AI próbálja majd elzárni a szelepet, de minél több kreditet ölsz a hackbe, annál tovább tudom fagyasztva tartani a rohadékokat az ereszkedés közben!\""
         },
@@ -408,7 +389,7 @@ enemies: [
             title: "SZEIZMIKUS REZONÁTOR",
             requirementText: "FELOLDÁS: Alapértelmezett hozzáférés.",
             checkUnlock: () => true, // Alapból olvasható a kódexben
-            statInfo: () => `<div style="text-align:center;">HATÓSUGÁR: 5 MÉTER<br>PUSZTÍTÓ ERŐ: EXTRÉM<br><span style="color:#ff5555; font-size:12px;">MAX KAPACITÁS: 1 DB</span></div>`,
+            statInfo: 'resonator',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/f7a96ae62770a39151b6187afb4bc708b4e3b6c8/Pictures/Seismic%20Resonator.jpg", 
             audio: "", // Ide majd tehetsz ElevenLabs hangot!
             text: "KRONOS ELEMZÉS: Ipari szeizmikus bontótöltet. Eredeti cél: mélyszinti bazalt és obszidián kőzetrétegek porlasztása az R&D szektor számára. Az eszköz által generált akusztikus frekvencia kizárólag a rideg szilárd anyagokat roncsolja. Az edzett ipari acéllal nem lép rezonanciába, így megóvja a létesítmény infrastruktúráját. Használata munkaállomások területén engedélyezett. A folyamat magas hőt és energiát generál.\n\nGALLAGHER MEGJEGYZÉSE: \"Ezek a bányász-dobozok menthetik meg az életedet, ECHO. A gép hangja pont olyan frekvencián csipog, ami megegyezik a Nexus mag kommunikációs rezonanciájával. Ezért vonzza a Kaptár hordáit. Ha lerakod, minden mutáns a közeledben ráfókuszál. A hullám ami utána jön, szó szerint leolvasztja a húst a csontjaikról, és még a savas pocsolyákat is elpárologtatja. De vigyázz, a Nexus Node átlát a cselen és megpróbálja aktiválás előtt szétverni a gépezetet! Azt se feledd hogy ez egy dögnehéz és instabil a szerkezet. Egyszerre csak egyetlen darabot tudsz a hátadra szíjazni. Oszd be jól, hogy mikor használod!\""
@@ -419,10 +400,7 @@ enemies: [
             title: "NEURÁLIS SZINKRONIZÁCIÓ (NEURO-LINK)",
             requirementText: "FELOLDÁS: Alapértelmezett hozzáférés.",
             checkUnlock: () => true, // Alapból olvasható a kódexben
-            statInfo: () => {
-                let boost = (typeof playerStats !== 'undefined' && playerStats.uploadedDataPackets) ? (playerStats.uploadedDataPackets * 5) : 0;
-                return `<div style="text-align:center; color:#ff00ff; text-shadow: 0 0 10px #ff00ff;">AKTÍV HARCI OPTIMALIZÁCIÓ:<br><span style="font-size:24px; font-weight:bold; color:#fff;">+${boost}% SEBZÉS</span></div>`;
-            },
+            statInfo: 'neural_link',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/e42cad0b2e12c3ce8a3a89a8fff0de47471b9f20/Pictures/Neuro%20Link.jpeg", 
             audio: "", // Ide is mehet majd egy szaftos audio log!
             text: "KRONOS ELEMZÉS: Közvetlen agyi interfész (Neuro-Link) protokoll. Eredeti cél: Az ECHO klón-egységek memóriájának formázása és az ipari bányászati sémák gyorsított betáplálása a felébredés pillanatában. A rendszer képes szintetikus reflexeket és nagy mennyiségű adatcsomagot közvetlenül a klóntest idegrendszerébe telepíteni. A folyamat extrém sejt-szintű stresszel és átmeneti kognitív sokkal (hallucinációkkal) jár.\n\nGALLAGHER MEGJEGYZÉSE: \"Ezt a portot a tarkódon eredetileg arra használták, hogy betáplálják az agyadba, hogyan kell kezelni a fúrógépeket. De rájöttem, hogyan használjuk ki jobban. Ha teljesíted a KRONOS túlélési tesztjeit (Direktívákat), a gép adatokat gyűjt a mutánsok anatómiájáról. Ezek a megfigyelések a szerveren várakoznak. Ha rácsatlakozol egy Terminálra, kifizeted a hozzáférést és elindítod a Neurális Letöltést, a KRONOS egyenesen az agyadba tölti fel ezeket a harci protokollokat.\n\nSzó szerint megtanítja az izmaidnak, mik a dögök gyenge pontjai, hova lőj és hogyan vágj, hogy a legnagyobb kárt tudd okozni! Fájni fog. Olyan érzés, mintha egy pillanatra villám csapna az agyadba, de minden egyes letöltéssel megnő az esélyed a túlélésre\""
@@ -474,62 +452,3 @@ export const OmniCorpDirectives = {
         { id: "t3_alpha", title: "OMEGA-DIREKTÍVA: REBIRTH", desc: "<span style='color:#00ffff;'>KRONOS:</span> OMEGA-PIROS FELÜLBÍRÁLAT. CÉLPONT: A MAG.<br><span style='color:#ffaa00;'>GALLAGHER:</span> ...ECHO... Juss el a 100. Szintig. Én lenn leszek a laborban. Végezd be...", type: "kill_body", target: "alpha", goal: 1, reward: 50000 }
     ]
 };
-
-export let playerStats = {
-    kills: { 
-        normal:  { body: 0, head: 0 }, 
-        runner:  { body: 0, head: 0 }, 
-        tank:    { body: 0, head: 0 }, 
-        stalker: { body: 0, head: 0 }, 
-        crawler: { body: 0, head: 0 }, 
-        boss:    { body: 0, head: 0 }, 
-        alpha:   { body: 0, head: 0 } 
-    },
-    plantsDestroyed: 0,
-    wavesSurvived: 0,
-    totalDataGathered: 0,
-    weaponsBought: { shotgun: false, rifle: false, super: false },
-    skillsBought: 0,
-    activeDirective: null, 
-    directiveProgress: 0,  
-    completedDirectives: [], 
-    abandonedDirectives: [],
-    pendingDataPackets: 0,
-    uploadedDataPackets: 0
-};
-
-export function loadPlayerStats() {
-    if (localStorage.getItem('OmniCorpStats')) {
-        try {
-            let savedStats = JSON.parse(localStorage.getItem('OmniCorpStats'));
-            if (savedStats && typeof savedStats === 'object') {
-                for (let key in savedStats) {
-                    if (typeof savedStats[key] === 'object' && savedStats[key] !== null && playerStats[key]) {
-                        Object.assign(playerStats[key], savedStats[key]);
-                    } else {
-                        playerStats[key] = savedStats[key];
-                    }
-                }
-            }
-            playerStats.activeDirective = null;
-            playerStats.directiveProgress = 0;
-            playerStats.completedDirectives = [];
-            playerStats.abandonedDirectives = [];
-        } catch(e) { 
-            console.warn("Sérült mentés törlése..."); 
-            localStorage.removeItem('OmniCorpStats'); 
-        }
-    }
-}
-
-export function savePlayerStats() {
-    localStorage.setItem('OmniCorpStats', JSON.stringify(playerStats));
-}
-
-export function getResearchLevel() {
-    return (playerStats && playerStats.uploadedDataPackets) ? playerStats.uploadedDataPackets : 0;
-}
-
-export function getDamageBoost() {
-    return 1.0 + (((playerStats && playerStats.uploadedDataPackets) ? playerStats.uploadedDataPackets : 0) * 0.05);
-}

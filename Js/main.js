@@ -59,6 +59,7 @@ EventBus.on('LOADING_COMPLETE', () => {
     // --- GPU & SHADER ELŐMELEGÍTÉS (PRE-WARM) ---
     // Megszünteti az első hullám és az első rezonátor lerakásakor tapasztalható megakadást
     preWarmShaders(Engine, AssetManager);
+    AssetManager.loadOptional();
     
     console.log('[KRONOS] Rendszerek sikeresen integrálva.');
 });
@@ -97,6 +98,9 @@ AssetManager.loadAll();
 // --- 4. Fő Játékhurok (Game Loop) ---
 let lastTime = performance.now();
 let menuYaw = 0;
+const updateBudget = {
+    lightVisibility: 0
+};
 const perfPanel = document.createElement('div');
 perfPanel.id = 'game-performance-monitor';
 perfPanel.style.cssText = 'position:fixed;top:12px;right:12px;z-index:9000;display:none;pointer-events:none;padding:10px 12px;background:rgba(0,12,12,.88);border:1px solid #00ccaa;color:#baffef;font:12px/1.5 monospace;white-space:pre;box-shadow:0 0 12px rgba(0,204,170,.25)';
@@ -171,8 +175,10 @@ function animate() {
     perfSampleCount = Math.min(perfSampleCount + 1, perfSamples.length);
     perfFrameCount++;
     const updateStartTime = performance.now();
-    if (typeof LevelManager.updateLightVisibility === 'function') {
+    updateBudget.lightVisibility += delta;
+    if (updateBudget.lightVisibility >= 0.1 && typeof LevelManager.updateLightVisibility === 'function') {
         LevelManager.updateLightVisibility(Engine.camera);
+        updateBudget.lightVisibility %= 0.1;
     }
 
     // Ha a játék fut

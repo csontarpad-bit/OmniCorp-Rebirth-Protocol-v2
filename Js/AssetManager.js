@@ -14,6 +14,9 @@ class AssetManager {
         this.textures = {};
         this.texturesByUrl = new Map();
         this.audioBuffers = {};
+        this.gameplayAssets = [];
+        this.gameplayAssetsStarted = false;
+        this.optionalAssets = [];
 
         this._initLoaders();
     }
@@ -26,16 +29,34 @@ class AssetManager {
 
         // --- KRITIKUS: Események elsütése betöltés alatt ---
         this.manager.onProgress = (url, itemsLoaded, itemsTotal) => {
-            const percent = Math.floor((itemsLoaded / itemsTotal) * 100);
+            const phaseOffset = this.gameplayAssetsStarted ? 20 : 0;
+            const phaseScale = this.gameplayAssetsStarted ? 0.8 : 0.2;
+            const percent = Math.floor(phaseOffset + (itemsLoaded / itemsTotal) * phaseScale * 100);
             EventBus.emit('LOADING_PROGRESS', percent);
         };
 
         this.manager.onLoad = () => {
+            if (!this.gameplayAssetsStarted && this.gameplayAssets.length) {
+                this.gameplayAssetsStarted = true;
+                this.gameplayAssets.splice(0).forEach(load => load());
+                return;
+            }
             EventBus.emit('LOADING_COMPLETE');
         };
     }
 
-    loadModel(name, url) {
+    loadModel(name, url, priority = 'gameplay') {
+        if (priority === 'optional') {
+            this.optionalAssets.push(() => this.loadModel(name, url, 'gameplay'));
+            return;
+        }
+        if (priority !== 'critical' && priority !== 'gameplay') {
+            throw new Error(`Unknown asset priority: ${priority}`);
+        }
+        if (priority === 'gameplay' && !this.gameplayAssetsStarted) {
+            this.gameplayAssets.push(() => this.loadModel(name, url, 'gameplay'));
+            return;
+        }
         if (!this.gltfLoader) return;
         this.gltfLoader.load(url, (gltf) => {
             let model = gltf.scene;
@@ -66,11 +87,27 @@ class AssetManager {
         return tex;
     }
 
-    loadAudio(name, url) {
+    loadAudio(name, url, priority = 'gameplay') {
+        if (priority === 'optional') {
+            this.optionalAssets.push(() => this.loadAudio(name, url, 'gameplay'));
+            return;
+        }
+        if (priority !== 'critical' && priority !== 'gameplay') {
+            throw new Error(`Unknown asset priority: ${priority}`);
+        }
+        if (priority === 'gameplay' && !this.gameplayAssetsStarted) {
+            this.gameplayAssets.push(() => this.loadAudio(name, url, 'gameplay'));
+            return;
+        }
         this.audioLoader.load(url, (buffer) => {
             this.audioBuffers[name] = buffer;
             EventBus.emit('AUDIO_LOADED', { name, buffer });
         });
+    }
+
+    loadOptional() {
+        const optionalAssets = this.optionalAssets.splice(0);
+        optionalAssets.forEach(load => load());
     }
 
     // --- PUBLIKUS KLÓNOZÓ METÓDUS (Független példányokhoz) ---
@@ -98,14 +135,14 @@ class AssetManager {
         // --- 3D Modellek ---
         this.loadModel('plant', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/061e749b34c35aa535f6a41895cdeaebaa6f4d1c/flesh_bomb.glb');
         this.loadModel('resonator', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/fdec8a5bc1e3f9c22360ed369f686eddf256695f/3DModels/Seismic%20Resonator.glb');
-        this.loadModel('zombie', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/main/zombie.glb');
+        this.loadModel('zombie', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/main/zombie.glb', 'critical');
         this.loadModel('runner', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/0214d22fe4ca2284df78cbf1eb8f820834651f9a/runerv2.glb');
         this.loadModel('tank', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/7e6d7e06a66a6c9df5665f7df2a92cdfb14846d7/tankv2.glb');
         this.loadModel('hider', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/6aa130a4c148ae5e16855905c4a15b9978e974ee/hider%20zombie.glb');
         this.loadModel('crawler', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/3530b5fab56eb32e0fe925babfef2db89bd2b1ac/crying_head_2.glb');
         this.loadModel('boss', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/6100b7a688723ad1b3a67403b99e8dbaf82fc040/three-head.glb');
         // FPS Fegyverek
-        this.loadModel('pistol', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/54aa4e08f9a8991f952a06b845453bf31403aff8/3DModels/fps_pistol_animated.glb');
+        this.loadModel('pistol', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/54aa4e08f9a8991f952a06b845453bf31403aff8/3DModels/fps_pistol_animated.glb', 'critical');
         this.loadModel('rifle', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/54aa4e08f9a8991f952a06b845453bf31403aff8/3DModels/fps_animated_smg.glb');
         this.loadModel('super', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/54aa4e08f9a8991f952a06b845453bf31403aff8/3DModels/revolver_animated.glb');
         this.loadModel('shotgun', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/54aa4e08f9a8991f952a06b845453bf31403aff8/3DModels/shotgun_animated.glb');
@@ -122,8 +159,8 @@ class AssetManager {
 
         // --- Hangok ---
         this.loadAudio('music', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/f162302b83992b9adfe75b1c3ade387a25e2478d/music.mp3');
-        this.loadAudio('menuMusic', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/212958c21ddceb0db80820c1d91b06b7d9a5a950/main.m4a');
-        this.loadAudio('loadingMusic', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/fea9f5d83283e004ddc56527e42e8d665ef93bc0/Loading%20Screen%20music.mp3');
+        this.loadAudio('menuMusic', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/212958c21ddceb0db80820c1d91b06b7d9a5a950/main.m4a', 'critical');
+        this.loadAudio('loadingMusic', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/fea9f5d83283e004ddc56527e42e8d665ef93bc0/Loading%20Screen%20music.mp3', 'critical');
         this.loadAudio('whispers', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/610723d633422339cc4d1d3384fcc2a70a98f27a/whispers.mp3');
         this.loadAudio('glitch', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/102a0d507c37ef59b9aeb075e1b30110c95f3b3f/noice02.mp3');
         this.loadAudio('defibrillator', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/306cb8beb9956a05ffb3ea66d00923be4cb95b5c/Sound/shock.mp3');
@@ -180,9 +217,9 @@ class AssetManager {
         this.loadAudio('hiderStep', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/72f3fdbf963b4e0b53e98a3633e958164014a89e/Sound/hider%20step.mp3');
         this.loadAudio('crawlerDeath', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/72f3fdbf963b4e0b53e98a3633e958164014a89e/Sound/crawler%20detah.mp3');
         this.loadAudio('crawlerStep', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/72f3fdbf963b4e0b53e98a3633e958164014a89e/Sound/crawler%20footstep%203%20sec.mp3');
-        this.loadAudio('bossAttack', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/d992c4493c5e5a4fb0c3e9d8134bdc308aa5f46d/boss%20screem%20v2.mp3');
-        this.loadAudio('bossDeath', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/72f3fdbf963b4e0b53e98a3633e958164014a89e/Sound/nexus%20node%20death.mp3');
-        this.loadAudio('bossGrowl', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/72f3fdbf963b4e0b53e98a3633e958164014a89e/Sound/nexus%20node%20growling.mp3');
+        this.loadAudio('bossAttack', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/d992c4493c5e5a4fb0c3e9d8134bdc308aa5f46d/boss%20screem%20v2.mp3', 'optional');
+        this.loadAudio('bossDeath', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/72f3fdbf963b4e0b53e98a3633e958164014a89e/Sound/nexus%20node%20death.mp3', 'optional');
+        this.loadAudio('bossGrowl', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/72f3fdbf963b4e0b53e98a3633e958164014a89e/Sound/nexus%20node%20growling.mp3', 'optional');
         this.loadAudio('gateOpen', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/96eadb746f7957548bcc9acff700d61a1ce667f0/Sound/gate%20open.mp3');
         this.loadAudio('elevatorStop', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/96eadb746f7957548bcc9acff700d61a1ce667f0/Sound/elevator%20stop.mp3');
         this.loadAudio('elevatorMove', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/96eadb746f7957548bcc9acff700d61a1ce667f0/Sound/heavy%20duty%20underground%20elevator.mp3');

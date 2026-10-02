@@ -21,10 +21,10 @@ class VFXManager {
         this.radSystem = null;
         this.fogSystem = null;
 
-        this._bindEvents();
     }
 
     init(scene, camera) {
+        this.bindEvents();
         this.scene = scene;
         this.camera = camera;
         
@@ -41,7 +41,10 @@ class VFXManager {
         this.createFogSystem();
     }
 
-    _bindEvents() {
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('WEAPON_FIRED', (data) => this.showMuzzleFlash(data));
         EventBus.on('SPAWN_SONIC_BOOM', (data) => this.spawnSonicBoom(data));
         EventBus.on('RESONATOR_BLAST_PULSE', (data) => this.spawnResonatorSteam(data));
@@ -59,6 +62,12 @@ class VFXManager {
         EventBus.on('GAME_OVER', () => this.clearScreenBlood());
         EventBus.on('RETURN_TO_MAIN_MENU', () => this.clearScreenBlood());
         EventBus.on('START_GAME', () => this.reset());
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     setFreezeVisuals(isFrozen) {

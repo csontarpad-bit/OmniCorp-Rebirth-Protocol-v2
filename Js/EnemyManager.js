@@ -23,10 +23,18 @@ export class EnemyManager {
         this.hitboxOffset = new THREE.Vector3();
         this.hitboxGeometryCache = new Map();
         this.activeFreezeTimer = 0;
+        this.spatialGridTimer = 0;
+        this.collisionTimer = 0;
         this.currentWave = 1; // FIX: Hullámszám nyomonkövetése az animációs sebességhez
         this.activeResonatorScreams = {};
         this.globalHitboxMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: false, visible: false });
         
+    }
+
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('START_GAME', (data) => {
             if (data && data.difficulty) this.difficulty = data.difficulty;
             this.currentWave = 1;
@@ -50,9 +58,16 @@ export class EnemyManager {
                 this.enemyHitboxes.splice(idx, 1);
             }
         });
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     init(scene, navigation, assetManager, itemManager) {
+        this.bindEvents();
         this.scene = scene;
         this.navigation = navigation;
         this.assetManager = assetManager;
@@ -78,6 +93,7 @@ export class EnemyManager {
         this.enemySpatialCellByEnemy.clear();
         this.enemySpatialIndices.clear();
         this.nearbyEnemyBuffer.length = 0;
+        this.spatialGridDirty = false;
 
         if (this.deadBodies) {
             this.deadBodies.forEach(db => {
@@ -98,6 +114,8 @@ export class EnemyManager {
         }
 
         this.activeFreezeTimer = 0;
+        this.spatialGridTimer = 0;
+        this.collisionTimer = 0;
 
         if (this.activeResonatorScreams) {
             for (let id in this.activeResonatorScreams) {
@@ -762,6 +780,7 @@ export class EnemyManager {
         }
 
         this.enemies.push(newEnemy);
+        this.spatialGridDirty = true;
         EventBus.emit('ENEMY_SPAWNED', newEnemy);
     } 
 
@@ -827,7 +846,10 @@ export class EnemyManager {
         });
         
         let enIdx = this.enemies.indexOf(en);
-        if (enIdx > -1) this.enemies.splice(enIdx, 1);
+        if (enIdx > -1) {
+            this.enemies.splice(enIdx, 1);
+            this.spatialGridDirty = true;
+        }
     }
 
     onEntityTakeDamage(data) {
@@ -1008,7 +1030,12 @@ export class EnemyManager {
         }
 
         // Alap frissítés. A komplex mozgás logika és támadás külön hívható vagy itt bővíthető.
-        this.buildEnemySpatialGrid();
+        this.spatialGridTimer = (this.spatialGridTimer || 0) + delta;
+        if (this.spatialGridDirty || this.spatialGridTimer >= 0.1) {
+            this.buildEnemySpatialGrid();
+            this.spatialGridDirty = false;
+            this.spatialGridTimer %= 0.1;
+        }
         for (let i = 0; i < this.enemies.length; i++) {
             const en = this.enemies[i];
             
@@ -1029,6 +1056,7 @@ export class EnemyManager {
                 }
                 
                 this.enemies.splice(i, 1);
+                this.spatialGridDirty = true;
                 i--;
                 continue; 
             }
@@ -1565,7 +1593,11 @@ export class EnemyManager {
         }
 
         // Ellenségek közötti és játékos elleni fizikai ütközés / szeparáció feloldása minden fázisban
-        this.resolveCollisions(playerPos);
+        this.collisionTimer = (this.collisionTimer || 0) + delta;
+        if (this.collisionTimer >= 0.05) {
+            this.resolveCollisions(playerPos);
+            this.collisionTimer %= 0.05;
+        }
 
         // Hitboxok pontos szinkronizálása a végleges pozíciókhoz
         for (let i = 0; i < this.enemies.length; i++) {

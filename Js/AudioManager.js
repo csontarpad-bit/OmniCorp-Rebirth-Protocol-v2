@@ -84,10 +84,12 @@ class AudioManager {
             bossGrowl: 1.0
         };
 
-        this._bindEvents();
     }
 
-    _bindEvents() {
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('AUDIO_LOADED', (data) => {
             this.registerSound(data.name, data.buffer);
         });
@@ -243,6 +245,12 @@ class AudioManager {
                 }
             }
         });
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     stopAudioByName(sName) {
@@ -263,6 +271,7 @@ class AudioManager {
     }
 
     init(camera, existingListener = null) {
+        this.bindEvents();
         this.camera = camera;
         if (existingListener) {
             this.listener = existingListener;

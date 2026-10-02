@@ -50,10 +50,12 @@ export class Player {
         this.continuousPainActive = false;
         this.continuousPainGraceTimer = 0;
 
-        this._bindEvents();
     }
 
-    _bindEvents() {
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('PLAYER_TAKE_DAMAGE', (amount) => this.onTakeDamage(amount));
         EventBus.on('HEAL_PLAYER', (amount) => this.onHeal(amount));
         EventBus.on('ADD_ARMOR', (amount) => this.onAddArmor(amount));
@@ -139,6 +141,12 @@ export class Player {
             EventBus.emit('STOP_AUDIO', { id: 'whispers' });
             EventBus.emit('INFECTION_CHANGED', { playerInfection: 0 });
         });
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     reset() {
@@ -195,6 +203,7 @@ export class Player {
     }
 
     init(engine) {
+        this.bindEvents();
         this.engine = engine;
         this.camera = engine.camera;
         

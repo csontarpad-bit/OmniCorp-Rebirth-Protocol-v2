@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
-import { playerStats, savePlayerStats } from './Database.js';
+import { playerStats, savePlayerStats } from './RuntimeState.js';
 
 class ItemManager {
     constructor() {
@@ -34,10 +34,12 @@ class ItemManager {
         this.currentWave = 1;
         this.pendingMutations = [];
 
-        this._bindEvents();
     }
 
-    _bindEvents() {
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('SPAWN_MEDKIT', (data) => this.spawnMedkit(data.x, data.z));
         EventBus.on('SPAWN_AMMO', (data) => this.spawnAmmoBox(data.x, data.z));
         EventBus.on('SPAWN_TOXIC_PUDDLE', (data) => this.createToxicPuddle(data.x, data.z));
@@ -66,6 +68,12 @@ class ItemManager {
             }
         });
         EventBus.on('START_GAME', () => this.reset());
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     reset() {
@@ -116,6 +124,7 @@ class ItemManager {
     }
 
     init(scene, assetManager, inputManager) {
+        this.bindEvents();
         this.scene = scene;
         this.assetManager = assetManager;
         this.inputManager = inputManager;

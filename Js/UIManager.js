@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
-import { OmniCorpDatabase, OmniCorpDirectives, playerStats, savePlayerStats, weapons, skills } from './Database.js';
+import { OmniCorpDatabase, OmniCorpDirectives, weapons, skills } from './Database.js';
+import { playerStats, savePlayerStats } from './RuntimeState.js';
+import { renderArchiveStatHTML } from './UITemplates.js';
 
 class UIManager {
     constructor() {
@@ -35,7 +37,7 @@ class UIManager {
         this._setupMainMenu();
         this._setupGameUI();
         this._setupDevMenu();
-        this._bindEventBus();
+        this.bindEvents();
     }
 
     _bindDOM() {
@@ -55,7 +57,10 @@ class UIManager {
         this.omniDirContent = document.getElementById('dir-content');
     }
 
-    _bindEventBus() {
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('HP_CHANGED', (data) => this.updateHP(data));
         EventBus.on('ARMOR_CHANGED', (data) => this.updateArmor(data));
         EventBus.on('AMMO_CHANGED', (data) => this.updateAmmo(data));
@@ -208,6 +213,12 @@ class UIManager {
                 EventBus.emit('REQUEST_SHOP_UPDATE');
             }
         });
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
 
@@ -1576,7 +1587,11 @@ class UIManager {
         if (dataArray && Array.isArray(dataArray)) {
             dataArray.forEach(item => {
                 let isUnlocked = item.checkUnlock ? item.checkUnlock() : true;
-                let statText = item.statInfo ? item.statInfo() : null;
+                let statText = typeof item.statInfo === 'function'
+                    ? item.statInfo()
+                    : item.statInfo
+                        ? renderArchiveStatHTML(item.statInfo, { playerStats, weapons, skills })
+                        : null;
                 let actualText = typeof item.text === 'function' ? item.text() : item.text;
 
                 this.createArchiveButton({

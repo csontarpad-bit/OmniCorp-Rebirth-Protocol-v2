@@ -33,14 +33,26 @@ class LevelManager {
         this.smokeTickTimer = 0.0;
         this.corridorFogMat = null;
 
-        // Esemény feliratkozások szigorúan nyílfüggvényekkel (Refactor Rule #4)
+    }
+
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('START_ELEVATOR_MOVE', () => this.startElevator());
         EventBus.on('STOP_ELEVATOR_MOVE', () => this.stopElevator());
         EventBus.on('OPEN_AIRLOCK_GATES', (data) => this.openDoors(data ? data.duration : 7.5));
         EventBus.on('CLOSE_AIRLOCK_GATES', (data) => this.closeDoors(data ? data.duration : 1.5));
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     init(scene, assetManager) {
+        this.bindEvents();
         this.scene = scene;
         this.gatesGroup = new THREE.Group();
         this.gatesGroup.visible = false;

@@ -1,5 +1,6 @@
 import EventBus from './EventBus.js';
-import { weapons, skills, playerStats, savePlayerStats, OmniCorpDirectives } from './Database.js';
+import { weapons, skills, OmniCorpDirectives } from './Database.js';
+import { playerStats, savePlayerStats } from './RuntimeState.js';
 
 export class GameManager {
     constructor() {
@@ -31,7 +32,12 @@ export class GameManager {
         this.itemManager = null;
         this.weaponSystem = null;
 
-        // Esemény feliratkozások (Szigorúan nyílfüggvények a this kontextus megőrzésére)
+    }
+
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('ADD_SCORE', (amount) => this.onAddScore(amount));
         EventBus.on('START_GAME', (data) => this.onStartGame(data));
         EventBus.on('START_WAVE_COUNTDOWN', (isFirst) => this.startWaveCountdown(isFirst));
@@ -99,6 +105,12 @@ export class GameManager {
             this.isGodMode = isGod;
             EventBus.emit('SET_GOD_MODE', isGod);
         });
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     onReturnToMainMenu() {
@@ -124,6 +136,7 @@ export class GameManager {
     }
 
     init(player, enemyManager, itemManager, weaponSystem) {
+        this.bindEvents();
         this.player = player;
         this.enemyManager = enemyManager;
         this.itemManager = itemManager;

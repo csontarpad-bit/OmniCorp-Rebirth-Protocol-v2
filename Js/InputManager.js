@@ -27,10 +27,12 @@ class InputManager {
         this.isLookLocked = false;
         this.isInitialized = false;
 
-        this._bindEvents();
     }
 
-    _bindEvents() {
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('SET_SENSITIVITY', (val) => {
             if (typeof val === 'number') this.sensitivity = val;
         });
@@ -66,10 +68,17 @@ class InputManager {
             this.isLookLocked = false;
         });
         EventBus.on('REQUEST_POINTER_LOCK', () => this.requestSafePointerLock());
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     init() {
         if (this.isInitialized) return;
+        this.bindEvents();
         this.isInitialized = true;
 
         window.addEventListener('keydown', (e) => this.onKeyDown(e));

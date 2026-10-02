@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
-import { weapons, getDamageBoost } from './Database.js';
+import { weapons } from './Database.js';
+import { getDamageBoost } from './RuntimeState.js';
 
 export class WeaponSystem {
     constructor() {
@@ -45,10 +46,12 @@ export class WeaponSystem {
         this.playerRef = null;
         this.inputManagerRef = null;
 
-        this._bindEvents();
     }
 
-    _bindEvents() {
+    bindEvents() {
+        if (this._eventsBound) return;
+        this._eventsBound = true;
+        EventBus.withOwner(this, () => {
         EventBus.on('SHOOT_PRESSED', () => this.onShootStart());
         EventBus.on('RELOAD_PRESSED', () => this.onReload());
         EventBus.on('WEAPON_SWITCH', (id) => this.onWeaponSwitch(id));
@@ -76,6 +79,12 @@ export class WeaponSystem {
                 }
             }
         });
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
         EventBus.on('START_GAME', () => this.reset());
         EventBus.on('GAME_OVER', () => this.hideAllWeapons());
         EventBus.on('RETURN_TO_MAIN_MENU', () => this.hideAllWeapons());
@@ -114,6 +123,7 @@ export class WeaponSystem {
     }
 
     init(engine, enemyManager, itemManager, assetManager) {
+        this.bindEvents();
         this.engine = engine;
         this.camera = engine.camera;
         this.scene = engine.scene;
