@@ -97,6 +97,9 @@ AssetManager.loadAll();
 
 // --- 4. Fő Játékhurok (Game Loop) ---
 let lastTime = performance.now();
+let lastFrameTime = lastTime;
+let frameAccumulator = 0;
+const frameIntervalToleranceMs = 0.01;
 let menuYaw = 0;
 const updateBudget = {
     lightVisibility: 0
@@ -169,9 +172,17 @@ function animate() {
     requestAnimationFrame(animate);
     
     let time = performance.now();
-    let frameTimeMs = Math.max(0, time - lastTime);
-    let delta = Math.min(frameTimeMs / 1000, 0.1); // Max 0.1 delta a fizika szétesésének elkerülésére
+    const elapsedSinceFrame = Math.max(0, time - lastTime);
     lastTime = time;
+    const targetFrameMs = 1000 / (gameManager.gameState === 'PLAYING' ? 60 : 30);
+    if (elapsedSinceFrame > 100) frameAccumulator = targetFrameMs;
+    else frameAccumulator += elapsedSinceFrame;
+    if (frameAccumulator + frameIntervalToleranceMs < targetFrameMs) return;
+
+    let frameTimeMs = Math.max(0, time - lastFrameTime);
+    lastFrameTime = time;
+    frameAccumulator = Math.max(0, frameAccumulator - targetFrameMs);
+    let delta = Math.min(frameTimeMs / 1000, 0.1); // Max 0.1 delta a fizika szétesésének elkerülésére
     const sampleIndex = perfSampleIndex;
     perfSamples[sampleIndex] = frameTimeMs;
     perfSampleIndex = (sampleIndex + 1) % perfSamples.length;

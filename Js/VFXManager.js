@@ -14,6 +14,7 @@ class VFXManager {
         this.poolLaserMat = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 3 });
         this.sonicBooms = [];
         this.shockwaves = [];
+        this.shockwavePool = [];
         this.fogTexture = null;
         this.corridorSmokePuffs = [];
         this.freeCorridorSmokePuffs = [];
@@ -626,21 +627,30 @@ class VFXManager {
             baseDir = new THREE.Vector3(0, 0, 1);
         }
 
-        const puffMat = new THREE.SpriteMaterial({
-            map: this.fogTexture,
-            color: 0xff3300,
-            transparent: true,
-            opacity: 0.85,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false
-        });
-
-        // 6 gőz pamacs kilövellése a 8-as pásztázás nyomvonalán
-        for (let j = 0; j < 6; j++) {
-            const puff = new THREE.Sprite(puffMat.clone());
+        for (let j = 0; j < 3 && this.shockwaves.length < 96; j++) {
+            let puffData = this.shockwavePool.pop();
+            if (!puffData) {
+                const material = new THREE.SpriteMaterial({
+                    map: this.fogTexture,
+                    color: 0xff3300,
+                    transparent: true,
+                    opacity: 0.85,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                });
+                puffData = {
+                    mesh: new THREE.Sprite(material),
+                    direction: new THREE.Vector3(),
+                    life: 0,
+                    speed: 0,
+                    growth: 0,
+                    rotSpeed: 0
+                };
+            }
+            const puff = puffData.mesh;
             
             // Finom szóródás a nyaláb körül
-            let pDir = baseDir.clone();
+            const pDir = puffData.direction.copy(baseDir);
             pDir.x += (Math.random() - 0.5) * 0.12;
             pDir.y += (Math.random() - 0.5) * 0.12;
             pDir.z += (Math.random() - 0.5) * 0.12;
@@ -653,18 +663,16 @@ class VFXManager {
             let initialScale = Math.random() * 1.5 + 1.8;
             puff.scale.set(initialScale, initialScale, 1);
 
+            puff.material.opacity = 0.85;
+            puff.material.rotation = 0;
+            puff.visible = true;
             this.scene.add(puff);
-
-            this.shockwaves.push({
-                mesh: puff,
-                life: 0.9,
-                direction: pDir,
-                speed: Math.random() * 5.0 + 16.0,
-                growth: Math.random() * 7.0 + 6.0,
-                rotSpeed: (Math.random() - 0.5) * 4.0
-            });
+            puffData.life = 0.9;
+            puffData.speed = Math.random() * 5.0 + 16.0;
+            puffData.growth = Math.random() * 7.0 + 6.0;
+            puffData.rotSpeed = (Math.random() - 0.5) * 4.0;
+            this.shockwaves.push(puffData);
         }
-        puffMat.dispose();
     }
 
     showMuzzleFlash(data) {
@@ -949,7 +957,8 @@ class VFXManager {
 
                 if (sw.life <= 0) {
                     if (this.scene) this.scene.remove(sw.mesh);
-                    if (sw.mesh.material) sw.mesh.material.dispose();
+                    sw.mesh.visible = false;
+                    this.shockwavePool.push(sw);
                     this.shockwaves.splice(i, 1);
                 }
             }
@@ -1009,7 +1018,8 @@ class VFXManager {
         if (this.shockwaves) {
             for (let sw of this.shockwaves) {
                 if (this.scene && sw.mesh) this.scene.remove(sw.mesh);
-                if (sw.mesh && sw.mesh.material) sw.mesh.material.dispose();
+                if (sw.mesh) sw.mesh.visible = false;
+                this.shockwavePool.push(sw);
             }
             this.shockwaves = [];
         }

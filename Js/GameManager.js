@@ -8,6 +8,12 @@ export class GameManager {
         this.score = 0;
         this.currentWave = 1;
         this.enemiesToSpawn = 5;
+        this.pendingEnemySpawns = [];
+        this.pendingAggressiveSpawns = 0;
+        this.enemySpawnTimer = 0;
+        this.maxConcurrentEnemies = 12;
+        this.enemySpawnInterval = 0.45;
+        this.hudUpdateTimer = 0;
         this.totalPausedTime = 0;
         this.waveStartTime = 0;
         this.isWaveActive = false;
@@ -116,6 +122,9 @@ export class GameManager {
     onReturnToMainMenu() {
         this.gameState = 'MENU';
         this.isWaveActive = false;
+        this.pendingEnemySpawns.length = 0;
+        this.pendingAggressiveSpawns = 0;
+        this.enemySpawnTimer = 0;
         this.isElevating = false;
         this.elevatorPhase = 'idle';
         if (this.waveTimeout) {
@@ -149,6 +158,10 @@ export class GameManager {
         this.gameState = 'PLAYING';
         this.currentWave = 1;
         this.enemiesToSpawn = 5;
+        this.pendingEnemySpawns.length = 0;
+        this.pendingAggressiveSpawns = 0;
+        this.enemySpawnTimer = 0;
+        this.hudUpdateTimer = 0;
         this.score = 0;
         this.activeFreezeTimer = 0;
         this.freezeCooldown = 0;
@@ -216,6 +229,9 @@ export class GameManager {
     onPlayerDied() {
         this.gameState = 'GAMEOVER';
         this.isWaveActive = false;
+        this.pendingEnemySpawns.length = 0;
+        this.pendingAggressiveSpawns = 0;
+        this.enemySpawnTimer = 0;
         if (this.waveTimeout) clearTimeout(this.waveTimeout);
         if (this.glitchInterval) clearInterval(this.glitchInterval);
 
@@ -310,13 +326,15 @@ export class GameManager {
             }
         }
 
-        // Ellenségek generálása a 12 zsilipkapu alagútjaiból
+        // A nagy hullámok ne hozzák létre egyszerre az összes modellt.
         if (this.enemyManager) {
+            this.pendingEnemySpawns.length = 0;
+            this.pendingAggressiveSpawns = 0;
             let bossSpawning = (this.currentWave % 5 === 0 && this.currentWave >= 5);
             for (let i = 0; i < this.enemiesToSpawn; i++) {
                 let isBoss = (bossSpawning && i === 0);
-                let ePos = this.enemyManager.getEdgeSpawnPosition(isBoss ? 'boss' : null);
-                this.enemyManager.spawnEnemy(ePos.x, ePos.z, isBoss, null, this.currentWave, undefined, ePos);
+                this.pendingEnemySpawns.push({ isBoss, forceType: null });
+                this.pendingAggressiveSpawns++;
             }
 
             // Crawler zombik a sárga pocsolyák száma alapján
@@ -330,10 +348,32 @@ export class GameManager {
             else if (yellowPuddles >= 10) crawlerCount = 1;
 
             for (let c = 0; c < crawlerCount; c++) {
-                let cPos = this.enemyManager.getEdgeSpawnPosition();
-                this.enemyManager.spawnEnemy(cPos.x, cPos.z, false, 'crawler', this.currentWave, undefined, cPos);
+                this.pendingEnemySpawns.push({ isBoss: false, forceType: 'crawler' });
             }
         }
+        this.enemySpawnTimer = 0;
+        this.spawnQueuedEnemies(0);
+    }
+
+    spawnQueuedEnemies(delta) {
+        if (!this.enemyManager || this.pendingEnemySpawns.length === 0) return;
+
+        this.enemySpawnTimer = Math.max(0, this.enemySpawnTimer - delta);
+        if (this.enemySpawnTimer > 0 || this.enemyManager.enemies.length >= this.maxConcurrentEnemies) return;
+
+        const nextSpawn = this.pendingEnemySpawns.shift();
+        if (nextSpawn.forceType !== 'crawler') this.pendingAggressiveSpawns--;
+        const spawnPosition = this.enemyManager.getEdgeSpawnPosition(nextSpawn.isBoss ? 'boss' : null);
+        this.enemyManager.spawnEnemy(
+            spawnPosition.x,
+            spawnPosition.z,
+            nextSpawn.isBoss,
+            nextSpawn.forceType,
+            this.currentWave,
+            undefined,
+            spawnPosition
+        );
+        this.enemySpawnTimer = this.enemySpawnInterval;
     }
 
     onZombieKilled(data) {
@@ -357,7 +397,7 @@ export class GameManager {
 
         if (this.isWaveActive && this.enemyManager) {
             let activeAggressive = this.enemyManager.enemies.filter(e => e.type !== 'crawler').length;
-            if (activeAggressive === 0) {
+            if (activeAggressive === 0 && this.pendingAggressiveSpawns === 0) {
                 this.endWave();
             }
         }
@@ -365,6 +405,9 @@ export class GameManager {
 
     endWave() {
         this.isWaveActive = false;
+        this.pendingEnemySpawns.length = 0;
+        this.pendingAggressiveSpawns = 0;
+        this.enemySpawnTimer = 0;
 
         let waveDuration = (performance.now() / 1000) - this.waveStartTime - this.totalPausedTime;
         let parTime = this.enemiesToSpawn * 4;
@@ -467,10 +510,16 @@ export class GameManager {
             for (const enemy of this.enemyManager.enemies) {
                 if (enemy.type !== 'crawler') activeAggressive++;
             }
-            if (activeAggressive === 0) {
+            if (activeAggressive === 0 && this.pendingAggressiveSpawns === 0) {
                 this.endWave();
             }
         }
+
+        if (this.isWaveActive) this.spawnQueuedEnemies(delta);
+
+        this.hudUpdateTimer += delta;
+        if (this.hudUpdateTimer < 0.1) return;
+        this.hudUpdateTimer %= 0.1;
 
         // HUD frissítési adatok összeállítása és kiküldése
         let activeDirectiveData = null;

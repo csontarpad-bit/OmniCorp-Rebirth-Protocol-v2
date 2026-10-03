@@ -19,6 +19,7 @@ export class EnemyManager {
         this.enemySpatialIndices = new Map();
         this.nearbyEnemyBuffer = [];
         this.enemySpatialCellSize = 5;
+        this.maxFrozenCorpses = 20;
         this.hitboxBonePosition = new THREE.Vector3();
         this.hitboxOffset = new THREE.Vector3();
         this.radarLocalPosition = new THREE.Vector3();
@@ -87,6 +88,7 @@ export class EnemyManager {
             if (radarContainer && en.blip && en.blip.parentNode === radarContainer) {
                 radarContainer.removeChild(en.blip);
             }
+            this.disposeEnemyMaterials(en);
         }
         this.enemies = [];
         this.enemyHitboxes = [];
@@ -101,6 +103,7 @@ export class EnemyManager {
                 if (db.mesh && this.scene) {
                     this.scene.remove(db.mesh);
                 }
+                this.disposeEnemyMaterials(db);
             });
             this.deadBodies = [];
         }
@@ -110,6 +113,7 @@ export class EnemyManager {
                 if (pz.mesh && this.scene) {
                     this.scene.remove(pz.mesh);
                 }
+                this.disposeEnemyMaterials(pz);
             });
             this.zombiePool = [];
         }
@@ -128,6 +132,12 @@ export class EnemyManager {
 
     getHitboxes() {
         return this.enemyHitboxes;
+    }
+
+    disposeEnemyMaterials(enemy) {
+        if (!enemy || !Array.isArray(enemy.ownedMaterials)) return;
+        for (const material of enemy.ownedMaterials) material.dispose();
+        enemy.ownedMaterials.length = 0;
     }
 
     getHitboxGeometry(radius, height) {
@@ -442,6 +452,7 @@ export class EnemyManager {
         let isFromPool = false;
         let savedBodyOffsetY = 0;
         let savedHeadOffsetY = 0;
+        let ownedMaterials = [];
 
         let modelId = 'zombie';
         if (type === 'runner') modelId = 'runner';
@@ -464,6 +475,7 @@ export class EnemyManager {
             if (!anims) anims = pooledZombie.animations;
             savedBodyOffsetY = pooledZombie.bodyOffsetY; 
             savedHeadOffsetY = pooledZombie.headOffsetY; 
+            ownedMaterials = pooledZombie.ownedMaterials || [];
             isFromPool = true;
             
             mesh.visible = true;
@@ -532,8 +544,16 @@ export class EnemyManager {
                     child.frustumCulled = false;
                     
                     if (opacity < 1.0 || type === 'runner') {
-                        if (Array.isArray(child.material)) child.material = child.material.map(m => m.clone());
-                        else child.material = child.material.clone();
+                        if (Array.isArray(child.material)) {
+                            child.material = child.material.map(material => {
+                                const clonedMaterial = material.clone();
+                                ownedMaterials.push(clonedMaterial);
+                                return clonedMaterial;
+                            });
+                        } else {
+                            child.material = child.material.clone();
+                            ownedMaterials.push(child.material);
+                        }
                     }
 
                     if (opacity < 1.0) {
@@ -713,6 +733,7 @@ export class EnemyManager {
             hpMult: hpMult,
             reward: reward, 
             animations: anims,
+            ownedMaterials: ownedMaterials,
             mixer: mixer, 
             runAction: runAction, 
             attackAction: attackAction, 
@@ -842,6 +863,7 @@ export class EnemyManager {
         this.deadBodies.push({
             mesh: en.mesh, mixer: en.mixer, hasDeathAnim: en.hasDeathAnim,
             bodyOffsetY: en.bodyOffsetY, headOffsetY: en.headOffsetY, 
+            ownedMaterials: en.ownedMaterials,
             freezeTimer: animDuration + 0.1, frozen: false, sinking: false, type: en.type,
             animations: en.animations
         });
@@ -1237,7 +1259,7 @@ export class EnemyManager {
                             position: mouthPos,
                             direction: streamDir
                         });
-                        en.waveCooldown = 0.08; // Sűrűbb gőzáram, folyamatos 8-as szalag
+                        en.waveCooldown = 0.12;
                     }
                     
                     if (distToPlayer <= 8.5) {
@@ -1619,6 +1641,19 @@ export class EnemyManager {
                         corpse.mesh.traverse((child) => {
                             if (child.isMesh) child.frustumCulled = true;
                         });
+                    }
+
+                    let excessCorpses = 0;
+                    for (const body of this.deadBodies) {
+                        if (body.frozen && !body.sinking) excessCorpses++;
+                    }
+                    excessCorpses -= this.maxFrozenCorpses;
+                    for (let j = 0; j < this.deadBodies.length && excessCorpses > 0; j++) {
+                        const olderBody = this.deadBodies[j];
+                        if (olderBody.frozen && !olderBody.sinking) {
+                            olderBody.sinking = true;
+                            excessCorpses--;
+                        }
                     }
                 }
             }

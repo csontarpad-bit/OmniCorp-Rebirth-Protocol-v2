@@ -61,19 +61,22 @@ export class Navigation {
     }
 
     hasLineOfSight(startPos, endPos, padding = 0.8) {
-        let dir = new THREE.Vector3().subVectors(endPos, startPos);
-        let dist = dir.length();
+        const dx = endPos.x - startPos.x;
+        const dy = endPos.y - startPos.y;
+        const dz = endPos.z - startPos.z;
+        const dist = Math.hypot(dx, dy, dz);
         if (dist <= 1.0) return true; // Közvetlen közelben nincs fal köztük
-        dir.normalize();
         
         // Csak a két pont KÖZÖTTI szakaszt vizsgáljuk:
         // Megállítjuk a vizsgálatot padding távolsággal a végpont (játékos) előtt,
         // így ha a játékos a falnak dőlve áll, a háta mögötti fal NEM teszi érvénytelenné a látóvonalat!
         let maxDist = Math.max(0.5, dist - padding);
         let steps = Math.floor(maxDist / 0.5); 
+        const stepX = dx / dist * 0.5;
+        const stepZ = dz / dist * 0.5;
         for (let i = 1; i <= steps; i++) {
-            let checkX = startPos.x + dir.x * (i * 0.5);
-            let checkZ = startPos.z + dir.z * (i * 0.5);
+            let checkX = startPos.x + stepX * i;
+            let checkZ = startPos.z + stepZ * i;
             if (this.levelManager && this.levelManager.checkWallCollision(checkX, checkZ, padding)) {
                 return false; 
             }
@@ -128,13 +131,12 @@ export class Navigation {
         let bestTarget = null;
 
         for (let wp of this.waypoints) {
-            // OPTIMALIZÁCIÓ 1: Távolság szűrés (Spatial Hashing alap)
-            let distFromEnemy = wp.distanceTo(enemyPos);
-            if (distFromEnemy > 15.0 || distFromEnemy < 1.5) continue; 
+            const distFromEnemySq = wp.distanceToSquared(enemyPos);
+            if (distFromEnemySq > 225 || distFromEnemySq < 2.25) continue;
 
             // Látja-e a zombi az adott (közeli) pontot tisztán?
             if (this.hasLineOfSight(enemyPos, wp, 0.2)) { 
-                let distToPlayer = wp.distanceTo(playerPos);
+                let distToPlayer = Math.sqrt(wp.distanceToSquared(playerPos));
                 
                 // Még mindig közelebb kell vinnie a játékoshoz
                 if (this.hasLineOfSight(wp, playerPos, 0.2)) {
