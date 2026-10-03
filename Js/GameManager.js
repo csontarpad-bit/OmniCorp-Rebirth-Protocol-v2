@@ -463,7 +463,10 @@ export class GameManager {
 
         // Ellenőrzés: ha minden agresszív zombi elpusztult
         if (this.isWaveActive && this.enemyManager) {
-            let activeAggressive = this.enemyManager.enemies.filter(e => e.type !== 'crawler').length;
+            let activeAggressive = 0;
+            for (const enemy of this.enemyManager.enemies) {
+                if (enemy.type !== 'crawler') activeAggressive++;
+            }
             if (activeAggressive === 0) {
                 this.endWave();
             }

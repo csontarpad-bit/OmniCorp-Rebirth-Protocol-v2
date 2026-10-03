@@ -64,6 +64,10 @@ export class WeaponSystem {
         EventBus.on('SWITCH_WEAPON_NEXT', () => this.switchNextWeapon());
         EventBus.on('GIVE_GLOBAL_AMMO', () => this.giveGlobalAmmo());
         EventBus.on('WEAPON_BUSY_STATE', (isBusy) => { this.isWeaponBusy = isBusy; });
+        EventBus.on('START_GAME', () => this.reset());
+        EventBus.on('GAME_OVER', () => this.hideAllWeapons());
+        EventBus.on('RETURN_TO_MAIN_MENU', () => this.hideAllWeapons());
+        EventBus.on('RESTART_GAME', () => this.hideAllWeapons());
         EventBus.on('MEDKIT_START', () => {
             this.isUsingMedkit = true;
             this.isWeaponBusy = true;
@@ -79,16 +83,6 @@ export class WeaponSystem {
                 }
             }
         });
-        });
-    }
-
-    unbindEvents() {
-        EventBus.removeListenersForOwner(this);
-        this._eventsBound = false;
-        EventBus.on('START_GAME', () => this.reset());
-        EventBus.on('GAME_OVER', () => this.hideAllWeapons());
-        EventBus.on('RETURN_TO_MAIN_MENU', () => this.hideAllWeapons());
-        EventBus.on('RESTART_GAME', () => this.hideAllWeapons());
         EventBus.on('MEDKIT_END', () => {
             this.isUsingMedkit = false;
             if (this.weaponModels['heal']) {
@@ -97,6 +91,12 @@ export class WeaponSystem {
             this.isWeaponBusy = false;
             this.equipWeapon(this.currentWeaponId);
         });
+        });
+    }
+
+    unbindEvents() {
+        EventBus.removeListenersForOwner(this);
+        this._eventsBound = false;
     }
 
     giveGlobalAmmo() {
@@ -551,6 +551,10 @@ export class WeaponSystem {
 
         // --- RAYCASTING LOGIKA ---
         this.camera.updateMatrixWorld(true);
+        let wpnMesh = this.weaponModels[this.currentWeaponId];
+        let mX = wpnMesh ? wpnMesh.position.x : 0.2;
+        let mY = wpnMesh ? wpnMesh.position.y + 0.08 : -0.2;
+        let mZ = wpnMesh ? wpnMesh.position.z - 0.7 : -1.0;
         for (let i = 0; i < pellets; i++) {
             let spreadX = (Math.random() - 0.5) * spread;
             let spreadY = (Math.random() - 0.5) * spread;
@@ -612,12 +616,6 @@ export class WeaponSystem {
                 }
             }
 
-            let wpnMesh = this.weaponModels[this.currentWeaponId];
-            let mX = wpnMesh ? wpnMesh.position.x : 0.2;
-            let mY = wpnMesh ? wpnMesh.position.y + 0.08 : -0.2;
-            let mZ = wpnMesh ? wpnMesh.position.z - 0.7 : -1.0;
-
-            this.camera.updateMatrixWorld();
             let startPos = new THREE.Vector3(mX, mY, mZ).applyMatrix4(this.camera.matrixWorld);
 
             if (this.currentWeaponId === 'super') {

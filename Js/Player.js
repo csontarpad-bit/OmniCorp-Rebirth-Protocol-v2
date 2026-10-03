@@ -49,6 +49,8 @@ export class Player {
         this.recentDamageTimes = [];
         this.continuousPainActive = false;
         this.continuousPainGraceTimer = 0;
+        this.infectionVisualTier = null;
+        this.lastWhisperVolume = null;
 
     }
 
@@ -123,6 +125,9 @@ export class Player {
             }
         });
         EventBus.on('START_GAME', () => this.reset());
+        EventBus.on('AUDIO_LOADED', (data) => {
+            if (data && data.name === 'whispers') this.lastWhisperVolume = null;
+        });
         EventBus.on('RETURN_TO_MAIN_MENU', () => {
             this.invulnerableTimer = 0;
             this.isUsingMedkit = false;
@@ -190,6 +195,8 @@ export class Player {
         }
         this.recentDamageTimes = [];
         this.continuousPainGraceTimer = 0;
+        this.infectionVisualTier = null;
+        this.lastWhisperVolume = null;
 
         if (this.camera) {
             this.camera.position.set(0, 1.6, 0);
@@ -390,12 +397,16 @@ export class Player {
         }
 
         // --- FERTŐZÉS (NEXUS SYNC) EFFEKT ÉS RÁNGÁSOK ---
-        if (this.infection > 0) {
+        const infectionVisualTier = this.infection > 75
+            ? 'infected-severe'
+            : (this.infection > 50 ? 'infected-medium' : (this.infection > 25 ? 'infected-mild' : null));
+        if (this.infectionVisualTier !== infectionVisualTier) {
             document.body.classList.remove('infected-mild', 'infected-medium', 'infected-severe');
-            if (this.infection > 75) document.body.classList.add('infected-severe');
-            else if (this.infection > 50) document.body.classList.add('infected-medium');
-            else if (this.infection > 25) document.body.classList.add('infected-mild');
+            if (infectionVisualTier) document.body.classList.add(infectionVisualTier);
+            this.infectionVisualTier = infectionVisualTier;
+        }
 
+        if (this.infection > 0) {
             if (this.infection >= 30) {
                 this.infectionSpasmTimer -= delta;
                 if (this.infectionSpasmTimer <= 0) {
@@ -419,12 +430,11 @@ export class Player {
                 }
             }
 
-            let whisperVolume = this.infection / 100;
-            if (this.infection < 10) whisperVolume = 0;
+        }
+        const whisperVolume = this.infection >= 10 ? this.infection / 100 : 0;
+        if (whisperVolume !== this.lastWhisperVolume) {
+            this.lastWhisperVolume = whisperVolume;
             EventBus.emit('SET_WHISPER_VOLUME', whisperVolume);
-        } else {
-            document.body.classList.remove('infected-mild', 'infected-medium', 'infected-severe');
-            EventBus.emit('SET_WHISPER_VOLUME', 0);
         }
 
         // --- FOLYAMATOS DROG-SEBZÉS (DoT) ---

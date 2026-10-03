@@ -664,6 +664,7 @@ class VFXManager {
                 rotSpeed: (Math.random() - 0.5) * 4.0
             });
         }
+        puffMat.dispose();
     }
 
     showMuzzleFlash(data) {

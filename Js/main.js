@@ -109,6 +109,7 @@ document.body.appendChild(perfPanel);
 const perfSamples = new Float32Array(300);
 const updatePerfSamples = new Float32Array(300);
 const renderPerfSamples = new Float32Array(300);
+const perfSortBuffer = new Float32Array(300);
 let perfSampleIndex = 0;
 let perfSampleCount = 0;
 let perfFrameCount = 0;
@@ -139,7 +140,9 @@ window.__gamePerf = {
 };
 
 function summarizePerfSamples(samples, count) {
-    const sorted = Array.from(samples.subarray(0, count)).sort((a, b) => a - b);
+    for (let i = 0; i < count; i++) perfSortBuffer[i] = samples[i];
+    const sorted = perfSortBuffer.subarray(0, count);
+    sorted.sort();
     let total = 0;
     for (let i = 0; i < sorted.length; i++) total += sorted[i];
     const p95Index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
@@ -227,7 +230,10 @@ function animate() {
         const frameStats = summarizePerfSamples(perfSamples, perfSampleCount);
         const updateStats = summarizePerfSamples(updatePerfSamples, perfSampleCount);
         const renderStats = summarizePerfSamples(renderPerfSamples, perfSampleCount);
-        const maxFrameMs = Math.max(...perfSamples);
+        let maxFrameMs = 0;
+        for (let i = 0; i < perfSampleCount; i++) {
+            maxFrameMs = Math.max(maxFrameMs, perfSamples[i]);
+        }
         const perf = window.__gamePerf;
         perf.fps = perfFrameCount * 1000 / reportElapsed;
         perf.avgFps = frameStats.average > 0 ? 1000 / frameStats.average : 0;
@@ -247,18 +253,20 @@ function animate() {
         perf.gameState = gameManager.gameState;
         perf.sampleWindowMs = frameStats.total;
 
+        // WebGL submission time does not include GPU execution, so use frame pacing
+        // rather than renderer.render() duration to detect sustained rendering pressure.
         if (perf.gameState !== 'PLAYING') {
             lowPerfDuration = 0;
             highPerfDuration = 0;
             if (Engine.renderScale < 1) Engine.setRenderScale(1);
-        } else if (perf.fps < 35 && perf.renderMs > 12) {
+        } else if (perf.fps < 45) {
             lowPerfDuration += reportElapsed;
             highPerfDuration = 0;
-            if (lowPerfDuration >= 2000 && Engine.renderScale > 1 / Engine.basePixelRatio) {
+            if (lowPerfDuration >= 2000 && Engine.renderScale > Engine.minimumPixelRatio / Engine.basePixelRatio) {
                 Engine.setRenderScale(Engine.renderScale - 0.1);
                 lowPerfDuration = 0;
             }
-        } else if (perf.fps > 50) {
+        } else if (perf.fps > 55) {
             highPerfDuration += reportElapsed;
             lowPerfDuration = 0;
             if (highPerfDuration >= 5000 && Engine.renderScale < 1) {

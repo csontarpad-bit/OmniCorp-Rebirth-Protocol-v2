@@ -21,6 +21,7 @@ export class EnemyManager {
         this.enemySpatialCellSize = 5;
         this.hitboxBonePosition = new THREE.Vector3();
         this.hitboxOffset = new THREE.Vector3();
+        this.radarLocalPosition = new THREE.Vector3();
         this.hitboxGeometryCache = new Map();
         this.activeFreezeTimer = 0;
         this.spatialGridTimer = 0;
@@ -1093,7 +1094,7 @@ export class EnemyManager {
             
             // Radar frissítés
             if (en.blip && playerCamera) {
-                const localPos = en.mesh.position.clone();
+                const localPos = this.radarLocalPosition.copy(en.mesh.position);
                 playerCamera.worldToLocal(localPos);
                 en.blip.style.left = (50 + localPos.x * 1.2) + '%';
                 en.blip.style.top = (50 + localPos.z * 1.2) + '%';
