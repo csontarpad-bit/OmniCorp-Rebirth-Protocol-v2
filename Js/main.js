@@ -24,66 +24,84 @@ const weaponSystem = new WeaponSystem();
 const gameManager = new GameManager();
 
 // --- 1. Alapvető rendszerek inicializálása ---
-Engine.init();
+// A WebGL engine és az erőforrás-betöltés csak a figyelmeztetés elfogadása után indul,
+// hogy a játék ne fagyjon be a kezdéskor a renderelés és a nagy GLTF letöltések miatt.
 if (typeof InputManager.init === 'function') {
     InputManager.init();
 }
 UIManager.init();
-if (typeof AudioManager.init === 'function') AudioManager.init(Engine.camera, Engine.listener);
 
-// --- 2. Feliratkozás a betöltés végére (KRITIKUS 2) ---
-let isInitialized = false;
-EventBus.on('LOADING_COMPLETE', () => {
-    if (isInitialized) return; // Végtelen hurok megakadályozása!
-    isInitialized = true;
-    
-    console.log('[KRONOS] LOADING_COMPLETE esemény fogadva. Játék modulok inicializálása...');
-    
-    // Szint és Navigáció
-    LevelManager.init(Engine.scene, AssetManager);
-    navigation.init(LevelManager);
-    
-    // Entitások és Rendszerek
-    enemyManager.init(Engine.scene, navigation, AssetManager, ItemManager);
-    ItemManager.init(Engine.scene, AssetManager, InputManager);
-    player.init(Engine);
-    weaponSystem.init(Engine, enemyManager, ItemManager, AssetManager);
-    
-    // VFX és Hálózat
-    if (typeof VFXManager.init === 'function') VFXManager.init(Engine.scene, Engine.camera, AssetManager);
-    if (typeof NetworkManager.init === 'function') NetworkManager.init();
-    
-    // GameManager
-    gameManager.init(player, enemyManager, ItemManager, weaponSystem);
-    
-    // --- GPU & SHADER ELŐMELEGÍTÉS (PRE-WARM) ---
-    // Megszünteti az első hullám és az első rezonátor lerakásakor tapasztalható megakadást
-    preWarmShaders(Engine, AssetManager);
-    AssetManager.loadOptional();
-    
-    console.log('[KRONOS] Rendszerek sikeresen integrálva.');
-});
+let bootstrapStarted = false;
+function bootstrapGame() {
+    if (bootstrapStarted) return;
+    bootstrapStarted = true;
 
-function preWarmShaders(engine, assetManager) {
+    Engine.init();
+    if (typeof AudioManager.init === 'function') AudioManager.init(Engine.camera, Engine.listener);
+
+    // --- 2. Feliratkozás a betöltés végére (KRITIKUS 2) ---
+    let isInitialized = false;
+    EventBus.on('LOADING_COMPLETE', () => {
+        if (isInitialized) return; // Végtelen hurok megakadályozása!
+        isInitialized = true;
+
+        console.log('[KRONOS] LOADING_COMPLETE esemény fogadva. Játék modulok inicializálása...');
+
+        // Szint és Navigáció
+        LevelManager.init(Engine.scene, AssetManager);
+        navigation.init(LevelManager);
+
+        // Entitások és Rendszerek
+        enemyManager.init(Engine.scene, navigation, AssetManager, ItemManager);
+        ItemManager.init(Engine.scene, AssetManager, InputManager);
+        player.init(Engine);
+        weaponSystem.init(Engine, enemyManager, ItemManager, AssetManager);
+
+        // VFX és Hálózat
+        if (typeof VFXManager.init === 'function') VFXManager.init(Engine.scene, Engine.camera, AssetManager);
+        if (typeof NetworkManager.init === 'function') NetworkManager.init();
+
+        // GameManager
+        gameManager.init(player, enemyManager, ItemManager, weaponSystem, LevelManager);
+
+        // --- GPU & SHADER ELŐMELEGÍTÉS (PRE-WARM) ---
+        // A korábbi, minden modell klónozásával végzett előmelegítés a kezdeti betöltést blokkolta.
+        // A minimális, nem blokkoló előmelegítés elkerüli a startup befagyást.
+        setTimeout(() => preWarmShaders(Engine), 50);
+        AssetManager.loadOptional();
+
+        console.log('[KRONOS] Rendszerek sikeresen integrálva.');
+        startAnimationLoop();
+    });
+
+    // --- 3. Erőforrások betöltése ---
+    // Ennek legutoljára kell meghívódnia, miután minden modul feliratkozott a LOADING_COMPLETE eseményre
+    AssetManager.loadAll();
+}
+
+EventBus.on('START_BOOTSTRAP', bootstrapGame);
+if (!document.getElementById('epilepsy-screen')) {
+    bootstrapGame();
+}
+
+function preWarmShaders(engine) {
     if (!engine || !engine.renderer || !engine.scene || !engine.camera) return;
     try {
-        const warmupGroup = new THREE.Group();
-        warmupGroup.position.set(0, -500, 0);
+        const warmupScene = new THREE.Scene();
+        warmupScene.background = null;
+        warmupScene.fog = null;
 
-        const modelKeys = ['normal', 'runner', 'tank', 'hider', 'crawler', 'boss', 'resonator', 'ammoModel', 'healthModel', 'pistol', 'rifle', 'shotgun', 'super', 'melee', 'heal'];
-        modelKeys.forEach(key => {
-            const mData = assetManager.cloneModel(key);
-            if (mData && mData.mesh) {
-                warmupGroup.add(mData.mesh);
-            }
-        });
+        const warmupMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.25, 0.25, 0.25),
+            new THREE.MeshBasicMaterial({ color: 0x00ffff })
+        );
+        warmupMesh.position.set(0, 0, -3);
+        warmupScene.add(warmupMesh);
 
-        engine.scene.add(warmupGroup);
-        engine.renderer.compile(engine.scene, engine.camera);
-        engine.renderer.render(engine.scene, engine.camera);
-        engine.scene.remove(warmupGroup);
+        engine.renderer.compile(warmupScene, engine.camera);
+        engine.renderer.render(warmupScene, engine.camera);
 
-        console.log('[KRONOS] GPU shaderek és modellek sikeresen előmelegítve (0 fps drop az első spawnnál/rezonátornál).');
+        console.log('[KRONOS] GPU előmelegítés elkészült egy minimális, nem blokkoló tesztobjektumon.');
     } catch (err) {
         console.warn('[KRONOS] Shader pre-warm figyelmeztetés:', err);
     }
@@ -209,6 +227,11 @@ function animate() {
         if (typeof ItemManager.update === 'function') ItemManager.update(delta, player.camera);
         if (typeof VFXManager.update === 'function') VFXManager.update(delta, player ? player.camera : Engine.camera);
         if (typeof gameManager.update === 'function') gameManager.update(delta);
+    } else if (gameManager.gameState === 'TERMINAL_TRANSITION') {
+        if (typeof LevelManager.update === 'function') LevelManager.update(delta);
+        if (typeof gameManager.update === 'function') gameManager.update(delta);
+    } else if (gameManager.gameState === 'SHOPPING') {
+        if (typeof LevelManager.update === 'function') LevelManager.update(delta);
     } else if (gameManager.gameState === 'MENU' || gameManager.gameState === 'GAMEOVER') {
         // --- VISSZAÁLLÍTVA: Filmes lebegés és forgás a halál / kilépés helyszínén ---
         if (Engine.camera && Engine.clock) {
@@ -303,5 +326,9 @@ function animate() {
     }
 }
 
-// Hurok indítása
-animate();
+let animationStarted = false;
+function startAnimationLoop() {
+    if (animationStarted) return;
+    animationStarted = true;
+    animate();
+}

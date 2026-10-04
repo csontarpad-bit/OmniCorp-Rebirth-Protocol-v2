@@ -9,7 +9,7 @@ class AssetManager {
         this.gltfLoader = null;
         this.audioLoader = null;
         this.textureLoader = null;
-        
+
         this.models = {};
         this.textures = {};
         this.texturesByUrl = new Map();
@@ -17,8 +17,35 @@ class AssetManager {
         this.gameplayAssets = [];
         this.gameplayAssetsStarted = false;
         this.optionalAssets = [];
+        this.assetLoadQueue = [];
+        this.activeAssetLoads = 0;
+        this.maxConcurrentAssetLoads = 2;
 
         this._initLoaders();
+    }
+
+    _startGameplayQueue() {
+        if (this.gameplayAssetsStarted) return;
+        this.gameplayAssetsStarted = true;
+        const queuedLoads = this.gameplayAssets.splice(0);
+        queuedLoads.forEach((load) => load());
+    }
+
+    _scheduleAssetLoad(task) {
+        this.assetLoadQueue.push(task);
+        this._flushAssetLoadQueue();
+    }
+
+    _flushAssetLoadQueue() {
+        while (this.activeAssetLoads < this.maxConcurrentAssetLoads && this.assetLoadQueue.length) {
+            const task = this.assetLoadQueue.shift();
+            if (!task) continue;
+            this.activeAssetLoads += 1;
+            task(() => {
+                this.activeAssetLoads = Math.max(0, this.activeAssetLoads - 1);
+                this._flushAssetLoadQueue();
+            });
+        }
     }
 
     _initLoaders() {
@@ -29,6 +56,7 @@ class AssetManager {
 
         // --- KRITIKUS: Események elsütése betöltés alatt ---
         this.manager.onProgress = (url, itemsLoaded, itemsTotal) => {
+            if (!itemsTotal) return;
             const phaseOffset = this.gameplayAssetsStarted ? 20 : 0;
             const phaseScale = this.gameplayAssetsStarted ? 0.8 : 0.2;
             const percent = Math.floor(phaseOffset + (itemsLoaded / itemsTotal) * phaseScale * 100);
@@ -37,8 +65,7 @@ class AssetManager {
 
         this.manager.onLoad = () => {
             if (!this.gameplayAssetsStarted && this.gameplayAssets.length) {
-                this.gameplayAssetsStarted = true;
-                this.gameplayAssets.splice(0).forEach(load => load());
+                this._startGameplayQueue();
                 return;
             }
             EventBus.emit('LOADING_COMPLETE');
@@ -58,18 +85,25 @@ class AssetManager {
             return;
         }
         if (!this.gltfLoader) return;
-        this.gltfLoader.load(url, (gltf) => {
-            let model = gltf.scene;
-            model.traverse((c) => { 
-                if(c.isMesh) {
-                    // Látvány megőrzése mellett: a renderelő hatékonyabb lesz, ha a frustum culling és a shadow check normál módon működik.
-                    c.frustumCulled = true;
-                    c.castShadow = false; // A renderer shadowMap kikapcsolt, ezért a shadow cast teljesen felesleges.
-                    c.receiveShadow = false;
-                }
+
+        this._scheduleAssetLoad((release) => {
+            this.gltfLoader.load(url, (gltf) => {
+                let model = gltf.scene;
+                model.traverse((c) => { 
+                    if(c.isMesh) {
+                        // Látvány megőrzése mellett: a renderelő hatékonyabb lesz, ha a frustum culling és a shadow check normál módon működik.
+                        c.frustumCulled = true;
+                        c.castShadow = false; // A renderer shadowMap kikapcsolt, ezért a shadow cast teljesen felesleges.
+                        c.receiveShadow = false;
+                    }
+                });
+                // NE hozz létre itt AnimationMixer-t, azt a modulok végzik!
+                this.models[name] = { scene: model, animations: gltf.animations };
+                release();
+            }, undefined, (error) => {
+                console.warn(`[AssetManager] model load error: ${name}`, error);
+                release();
             });
-            // NE hozz létre itt AnimationMixer-t, azt a modulok végzik!
-            this.models[name] = { scene: model, animations: gltf.animations };
         });
     }
 
@@ -99,9 +133,15 @@ class AssetManager {
             this.gameplayAssets.push(() => this.loadAudio(name, url, 'gameplay'));
             return;
         }
-        this.audioLoader.load(url, (buffer) => {
-            this.audioBuffers[name] = buffer;
-            EventBus.emit('AUDIO_LOADED', { name, buffer });
+        this._scheduleAssetLoad((release) => {
+            this.audioLoader.load(url, (buffer) => {
+                this.audioBuffers[name] = buffer;
+                EventBus.emit('AUDIO_LOADED', { name, buffer });
+                release();
+            }, undefined, (error) => {
+                console.warn(`[AssetManager] audio load error: ${name}`, error);
+                release();
+            });
         });
     }
 
@@ -131,6 +171,12 @@ class AssetManager {
     }
     loadAll() {
         console.log("[AssetManager] Betöltés indítása...");
+
+        if (!this.gameplayAssetsStarted) {
+            this.gameplayAssetsStarted = true;
+            const queuedLoads = this.gameplayAssets.splice(0);
+            queuedLoads.forEach((load) => load());
+        }
 
         // --- 3D Modellek ---
         this.loadModel('plant', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/061e749b34c35aa535f6a41895cdeaebaa6f4d1c/flesh_bomb.glb');

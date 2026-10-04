@@ -236,10 +236,14 @@ class UIManager {
                 // 1. Audio kontextus feloldása
                 EventBus.emit('UNLOCK_AUDIO');
 
-                // 2. Betöltőképernyő zene indítása
+                // 2. Következő lépés: a 3D motor és az erőforrások csak itt indulnak,
+                //    hogy a játék ne fagyjon be a figyelmeztetés elfogadása előtt.
+                EventBus.emit('START_BOOTSTRAP');
+
+                // 3. Betöltőképernyő zene indítása
                 EventBus.emit('PLAY_SOUND', 'loadingMusic');
 
-                // 3. Terminál szöveg indítása
+                // 4. Terminál szöveg indítása
                 this.typeTerminalLog();
 
                 setTimeout(() => {
@@ -1041,13 +1045,16 @@ class UIManager {
     }
 
     showInteractPrompt(data) {
-        const prompt = document.getElementById('loot-interaction-prompt') || document.getElementById('interact-prompt');
+        const prompt = data.type === 'terminal'
+            ? document.getElementById('terminal-interaction-prompt')
+            : document.getElementById('loot-interaction-prompt') || document.getElementById('interact-prompt');
         if (prompt) {
             if (data.visible) {
                 prompt.classList.remove('hidden');
                 let text = "Interakció [E]";
                 if (data.type === 'health') text = "Gen-Stab felvétele [E]";
                 if (data.type === 'ammo') text = "Lőszer felvétele [E]";
+                if (data.type === 'terminal') text = "KABINBA LÉPÉS — [E] HASZNÁLAT";
                 prompt.innerText = text;
             } else {
                 prompt.classList.add('hidden');
@@ -1143,6 +1150,8 @@ class UIManager {
         EventBus.emit('PLAY_SOUND', 'termOpen');
         if (this.shopMenu) this.shopMenu.classList.remove('hidden');
         document.getElementById('game-ui-wrapper').classList.add('hidden');
+        const closeShopButton = document.getElementById('close-shop-btn');
+        if (closeShopButton) closeShopButton.innerText = data.terminal ? 'LIFT INDÍTÁSA' : 'KAPCSOLAT BONTÁSA';
 
         const statsBar = document.getElementById('shop-points') ? document.getElementById('shop-points').parentNode.parentNode : null;
         const weaponBar = document.getElementById('shop-weapon-switches') ? document.getElementById('shop-weapon-switches').parentNode : null;

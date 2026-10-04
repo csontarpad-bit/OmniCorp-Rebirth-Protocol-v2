@@ -17,6 +17,13 @@ export class GameManager {
         this.totalPausedTime = 0;
         this.waveStartTime = 0;
         this.isWaveActive = false;
+        this.terminalReady = false;
+        this.terminalPromptVisible = false;
+        this.terminalSequence = 'idle';
+        this.terminalSequenceTime = 0;
+        this.terminalMoveFrom = null;
+        this.terminalMoveTo = null;
+        this.hasStartedAnyWave = false;
         this.lastWaveBonus = 0;
         this.pauseStartTime = 0;
 
@@ -34,6 +41,7 @@ export class GameManager {
         this.elevatorTimer = 0;
 
         this.player = null;
+        this.levelManager = null;
         this.enemyManager = null;
         this.itemManager = null;
         this.weaponSystem = null;
@@ -66,6 +74,7 @@ export class GameManager {
         });
         EventBus.on('ZOMBIE_KILLED', (data) => this.onZombieKilled(data));
         EventBus.on('PLAYER_DIED', () => this.onPlayerDied());
+        EventBus.on('input:interact', () => this.tryActivateTerminal());
 
         // Direktíva Események
         EventBus.on('ACCEPT_DIRECTIVE', (id) => this.onAcceptDirective(id));
@@ -90,8 +99,8 @@ export class GameManager {
         EventBus.on('REQUEST_SHOP_UPDATE', () => this.sendShopData());
         EventBus.on('CLEAR_SHOP_LOCK', () => { this.shopLockedForNextWave = false; });
         EventBus.on('CLOSE_SHOP', () => {
-            this.gameState = 'PLAYING';
-            this.startWaveCountdown(false);
+            if (this.gameState !== 'SHOPPING' || !this.terminalReady || this.terminalSequence !== 'menu') return;
+            this.beginTerminalExit();
         });
         EventBus.on('CHANGE_GAME_STATE', (state) => { this.gameState = state; });
         EventBus.on('RETURN_TO_MAIN_MENU', () => this.onReturnToMainMenu());
@@ -121,7 +130,12 @@ export class GameManager {
 
     onReturnToMainMenu() {
         this.gameState = 'MENU';
+        this.terminalSequence = 'idle';
+        if (this.levelManager) this.levelManager.setPodDoorOpen(false);
         this.isWaveActive = false;
+        this.terminalReady = false;
+        this.setTerminalPromptVisible(false);
+        EventBus.emit('TERMINAL_RESET');
         this.pendingEnemySpawns.length = 0;
         this.pendingAggressiveSpawns = 0;
         this.enemySpawnTimer = 0;
@@ -144,9 +158,10 @@ export class GameManager {
         EventBus.emit('PLAY_SOUND', { id: 'menuMusic' });
     }
 
-    init(player, enemyManager, itemManager, weaponSystem) {
+    init(player, enemyManager, itemManager, weaponSystem, levelManager) {
         this.bindEvents();
         this.player = player;
+        this.levelManager = levelManager;
         this.enemyManager = enemyManager;
         this.itemManager = itemManager;
         this.weaponSystem = weaponSystem;
@@ -156,7 +171,10 @@ export class GameManager {
 
     onStartGame(data) {
         this.gameState = 'PLAYING';
+        this.terminalSequence = 'idle';
+        if (this.levelManager) this.levelManager.setPodDoorOpen(false);
         this.currentWave = 1;
+        this.hasStartedAnyWave = false;
         this.enemiesToSpawn = 5;
         this.pendingEnemySpawns.length = 0;
         this.pendingAggressiveSpawns = 0;
@@ -166,6 +184,9 @@ export class GameManager {
         this.activeFreezeTimer = 0;
         this.freezeCooldown = 0;
         this.shopLockedForNextWave = false;
+        this.terminalReady = false;
+        this.setTerminalPromptVisible(false);
+        EventBus.emit('TERMINAL_RESET');
 
         // Gyári visszaállítás (Tiszta lap)
         for (let sKey in skills) {
@@ -178,6 +199,7 @@ export class GameManager {
 
         if (this.player) {
             this.player.reset();
+            this.player.camera.position.set(0, 1.6, 2.2);
         }
 
         if (this.enemyManager) {
@@ -201,7 +223,8 @@ export class GameManager {
         EventBus.emit('UPDATE_FREEZE_UI', { unlocked: false, cooldown: 0 });
         EventBus.emit('PLAY_SOUND', { id: 'music' });
         EventBus.emit('UI_UPDATE_NEEDED');
-        this.startWaveCountdown(true);
+        this.terminalReady = true;
+        this.updateTerminalProximity();
     }
 
     onAddScore(amount) {
@@ -282,6 +305,10 @@ export class GameManager {
             this.glitchInterval = null;
         }
 
+        this.terminalReady = false;
+        this.setTerminalPromptVisible(false);
+        EventBus.emit('TERMINAL_RESET');
+
         if (!isFirstWave) {
             this.currentWave++;
             this.enemiesToSpawn += 2;
@@ -304,6 +331,7 @@ export class GameManager {
 
     _startWaveAction() {
         this.isWaveActive = true;
+        this.hasStartedAnyWave = true;
         this.waveStartTime = performance.now() / 1000;
         this.totalPausedTime = 0;
 
@@ -404,6 +432,7 @@ export class GameManager {
     }
 
     endWave() {
+        if (!this.isWaveActive) return;
         this.isWaveActive = false;
         this.pendingEnemySpawns.length = 0;
         this.pendingAggressiveSpawns = 0;
@@ -427,8 +456,121 @@ export class GameManager {
         EventBus.emit('WAVE_COMPLETED', { wave: this.currentWave, bonus: this.lastWaveBonus });
         EventBus.emit('UI_UPDATE_NEEDED');
 
-        this.gameState = 'SHOPPING';
-        EventBus.emit('OPEN_SHOP', { shopLockedForNextWave: this.shopLockedForNextWave });
+        this.terminalReady = true;
+        this.gameState = 'PLAYING';
+        EventBus.emit('TERMINAL_ACTIVATED', { wave: this.currentWave });
+        this.updateTerminalProximity();
+    }
+
+    setTerminalPromptVisible(visible) {
+        if (this.terminalPromptVisible === visible) return;
+        this.terminalPromptVisible = visible;
+        EventBus.emit('SHOW_INTERACT_PROMPT', { visible, type: 'terminal' });
+    }
+
+    updateTerminalProximity() {
+        if (!this.terminalReady || !this.player || !this.player.camera) {
+            this.setTerminalPromptVisible(false);
+            return;
+        }
+
+        const { x, z } = this.player.camera.position;
+        const doorwayZ = 4.45 * (3.2 / 9.8);
+        const isNearTerminal = Math.hypot(x, z - doorwayZ) <= 0.9;
+        this.setTerminalPromptVisible(isNearTerminal);
+    }
+
+    tryActivateTerminal() {
+        if (!this.terminalReady || this.gameState !== 'PLAYING' || !this.player || !this.player.camera) return;
+
+        const { x, z } = this.player.camera.position;
+        const doorwayZ = 4.45 * (3.2 / 9.8);
+        if (Math.hypot(x, z - doorwayZ) > 0.9) return;
+
+        EventBus.emit('CONSUME_INTERACTION');
+        this.setTerminalPromptVisible(false);
+        this.beginTerminalEntry();
+    }
+
+    beginTerminalEntry() {
+        if (!this.levelManager || this.terminalSequence !== 'idle') return;
+        EventBus.emit('CLEAR_CORPSES');
+        this.gameState = 'TERMINAL_TRANSITION';
+        this.terminalSequence = 'enter-opening';
+        this.terminalSequenceTime = 0;
+        this.player.playerVelX = 0;
+        this.player.playerVelZ = 0;
+        this.levelManager.setPodDoorOpen(true);
+    }
+
+    beginTerminalExit() {
+        if (!this.levelManager || this.terminalSequence !== 'menu') return;
+        this.gameState = 'TERMINAL_TRANSITION';
+        this.terminalSequence = 'exit-opening';
+        this.terminalSequenceTime = 0;
+        this.player.playerVelX = 0;
+        this.player.playerVelZ = 0;
+        EventBus.emit('TERMINAL_RESET');
+        this.levelManager.setPodDoorOpen(true);
+    }
+
+    startTerminalMove(target, nextSequence) {
+        const position = this.player.camera.position;
+        this.terminalMoveFrom = { x: position.x, y: position.y, z: position.z };
+        this.terminalMoveTo = target;
+        this.terminalSequence = nextSequence;
+        this.terminalSequenceTime = 0;
+    }
+
+    updateTerminalSequence(delta) {
+        if (!this.player || !this.player.camera || !this.levelManager) return;
+        this.terminalSequenceTime += delta;
+
+        if (this.terminalSequence === 'enter-opening' && this.levelManager.podDoorProgress >= 0.98) {
+            this.startTerminalMove({ x: 0, y: 1.6, z: 0.15 }, 'enter-moving');
+        } else if (this.terminalSequence === 'enter-moving') {
+            const progress = Math.min(1, this.terminalSequenceTime / 0.85);
+            const eased = progress * progress * (3 - 2 * progress);
+            this.player.camera.position.set(
+                this.terminalMoveFrom.x + (this.terminalMoveTo.x - this.terminalMoveFrom.x) * eased,
+                this.terminalMoveFrom.y + (this.terminalMoveTo.y - this.terminalMoveFrom.y) * eased,
+                this.terminalMoveFrom.z + (this.terminalMoveTo.z - this.terminalMoveFrom.z) * eased
+            );
+            if (progress >= 1) {
+                this.terminalSequence = 'enter-closing';
+                this.terminalSequenceTime = 0;
+                this.levelManager.setPodDoorOpen(false);
+            }
+        } else if (this.terminalSequence === 'enter-closing' && this.levelManager.podDoorProgress <= 0.02) {
+            this.gameState = 'SHOPPING';
+            this.terminalSequence = 'menu';
+            EventBus.emit('TERMINAL_SESSION_ACTIVE');
+            EventBus.emit('OPEN_SHOP', {
+                shopLockedForNextWave: this.shopLockedForNextWave,
+                terminal: true
+            });
+        } else if (this.terminalSequence === 'exit-opening' && this.levelManager.podDoorProgress >= 0.98) {
+            this.startTerminalMove({ x: 0, y: 1.6, z: 2.2 }, 'exit-moving');
+        } else if (this.terminalSequence === 'exit-moving') {
+            const progress = Math.min(1, this.terminalSequenceTime / 0.85);
+            const eased = progress * progress * (3 - 2 * progress);
+            this.player.camera.position.set(
+                this.terminalMoveFrom.x + (this.terminalMoveTo.x - this.terminalMoveFrom.x) * eased,
+                this.terminalMoveFrom.y + (this.terminalMoveTo.y - this.terminalMoveFrom.y) * eased,
+                this.terminalMoveFrom.z + (this.terminalMoveTo.z - this.terminalMoveFrom.z) * eased
+            );
+            if (progress >= 1) {
+                this.terminalSequence = 'exit-closing';
+                this.terminalSequenceTime = 0;
+                this.levelManager.setPodDoorOpen(false);
+            }
+        } else if (this.terminalSequence === 'exit-closing' && this.levelManager.podDoorProgress <= 0.02) {
+            this.terminalSequence = 'idle';
+            this.gameState = 'PLAYING';
+            this.player.playerVelX = 0;
+            this.player.playerVelZ = 0;
+            this.startWaveCountdown(!this.hasStartedAnyWave);
+        }
     }
 
     triggerFreeze() {
@@ -445,7 +587,13 @@ export class GameManager {
     }
 
     update(delta) {
+        if (this.gameState === 'TERMINAL_TRANSITION') {
+            this.updateTerminalSequence(delta);
+            return;
+        }
         if (this.gameState !== 'PLAYING') return;
+
+        this.updateTerminalProximity();
 
         // Ipari felvonó és zsilipkapu szekvencia a szintek között
         if (this.isElevating) {

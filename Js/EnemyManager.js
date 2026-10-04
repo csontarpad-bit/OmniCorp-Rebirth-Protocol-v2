@@ -19,7 +19,6 @@ export class EnemyManager {
         this.enemySpatialIndices = new Map();
         this.nearbyEnemyBuffer = [];
         this.enemySpatialCellSize = 5;
-        this.maxFrozenCorpses = 20;
         this.hitboxBonePosition = new THREE.Vector3();
         this.hitboxOffset = new THREE.Vector3();
         this.radarLocalPosition = new THREE.Vector3();
@@ -47,6 +46,7 @@ export class EnemyManager {
         EventBus.on('FREEZE_TRIGGERED', (data) => this.onFreezeTriggered(data));
         EventBus.on('RESONATOR_BLAST_PULSE', (data) => this.onResonatorPulse(data));
         EventBus.on('WAVE_COMPLETED', () => this.onWaveCompleted());
+        EventBus.on('CLEAR_CORPSES', () => this.clearDeadBodies());
         
         EventBus.on('REGISTER_HITBOX', (hitbox) => {
             if (hitbox && !this.enemyHitboxes.includes(hitbox)) {
@@ -993,14 +993,16 @@ export class EnemyManager {
             }
             this.activeResonatorScreams = {};
         }
-        for (let i = this.enemies.length - 1; i >= 0; i--) {
-            if (this.enemies[i].type === 'crawler') {
-                this.killZombie(this.enemies[i], false);
-            }
+    }
+
+    clearDeadBodies() {
+        for (const corpse of this.deadBodies) {
+            if (corpse.mixer) corpse.mixer.stopAllAction();
+            corpse.mesh.visible = false;
+            corpse.sinking = false;
+            this.zombiePool.push(corpse);
         }
-        for (let c of this.deadBodies) {
-            c.sinking = true;
-        }
+        this.deadBodies.length = 0;
     }
 
     update(delta, playerCamera) {
@@ -1627,7 +1629,7 @@ export class EnemyManager {
             this.updateHitboxPositions(this.enemies[i]);
         }
 
-        // Hullák (deadBodies) frissítése és süllyesztése
+        // A hullák a terminállal való interakcióig a pályán maradnak.
         for (let i = this.deadBodies.length - 1; i >= 0; i--) {
             let corpse = this.deadBodies[i];
             if (!corpse.frozen) {
@@ -1643,26 +1645,6 @@ export class EnemyManager {
                         });
                     }
 
-                    let excessCorpses = 0;
-                    for (const body of this.deadBodies) {
-                        if (body.frozen && !body.sinking) excessCorpses++;
-                    }
-                    excessCorpses -= this.maxFrozenCorpses;
-                    for (let j = 0; j < this.deadBodies.length && excessCorpses > 0; j++) {
-                        const olderBody = this.deadBodies[j];
-                        if (olderBody.frozen && !olderBody.sinking) {
-                            olderBody.sinking = true;
-                            excessCorpses--;
-                        }
-                    }
-                }
-            }
-            if (corpse.sinking) {
-                corpse.mesh.position.y -= delta * 0.8;
-                if (corpse.mesh.position.y < -2.0) {
-                    corpse.mesh.visible = false;
-                    this.zombiePool.push(corpse);
-                    this.deadBodies.splice(i, 1);
                 }
             }
         }

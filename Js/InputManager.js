@@ -47,6 +47,10 @@ class InputManager {
             if (typeof data.pitch === 'number') this.pitch += data.pitch;
         });
 
+        EventBus.on('CONSUME_INTERACTION', () => {
+            this.isLootingKey = false;
+        });
+
         EventBus.on('START_GAME', () => this.reset());
         EventBus.on('RETURN_TO_MAIN_MENU', () => {
             this.keys = {
@@ -172,6 +176,7 @@ class InputManager {
                 break;
             case 'KeyE':
                 this.isLootingKey = true;
+                if (!e.repeat) EventBus.emit('input:interact');
                 break;
             case 'KeyR':
                 EventBus.emit('input:reload');

@@ -33,6 +33,17 @@ class LevelManager {
         this.smokeTickTimer = 0.0;
         this.corridorFogMat = null;
 
+        this.regenerationPod = null;
+        this.podStatusScreen = null;
+        this.podStatusTexture = null;
+        this.podPowerLight = null;
+        this.podRotor = null;
+        this.podAnimationTime = 0;
+        this.isTerminalActive = false;
+        this.podDoorPanels = [];
+        this.podDoorProgress = 0;
+        this.podDoorTarget = 0;
+
     }
 
     bindEvents() {
@@ -43,6 +54,8 @@ class LevelManager {
         EventBus.on('STOP_ELEVATOR_MOVE', () => this.stopElevator());
         EventBus.on('OPEN_AIRLOCK_GATES', (data) => this.openDoors(data ? data.duration : 7.5));
         EventBus.on('CLOSE_AIRLOCK_GATES', (data) => this.closeDoors(data ? data.duration : 1.5));
+        EventBus.on('TERMINAL_SESSION_ACTIVE', () => this.setTerminalActive(true));
+        EventBus.on('TERMINAL_RESET', () => this.setTerminalActive(false));
         });
     }
 
@@ -351,6 +364,8 @@ class LevelManager {
             this.wallHitboxes.push(new THREE.Box3().setFromObject(pMesh));
         });
 
+        this.createRegenerationPod();
+
         // --- 4. ZSILIPKAPU GYÁRTÓ SEGÉDFÜGGVÉNY (VIBRÁLÁS ÉS FEDÉSMENTES KIALAKÍTÁS) ---
         // A kapulap tisztán a falnyílás belsejében mozog, nincs közös lapja a falakkal, így zéró Z-fighting!
         const createAirlock = (doorCenterX, doorCenterZ, isXAxis, dirSign) => {
@@ -609,6 +624,156 @@ class LevelManager {
         console.log(`[KRONOS] LevelManager: Egységesített, folytonos -100. emeleti aknafalak (60m) és oszlopok kiépítve.`);
     }
 
+    createRegenerationPod() {
+        const pod = new THREE.Group();
+        pod.scale.set(3.2 / 9.8, 1, 3.2 / 9.8);
+        const steel = new THREE.MeshStandardMaterial({ color: 0x252d32, metalness: 0.88, roughness: 0.3 });
+        const trim = new THREE.MeshStandardMaterial({
+            color: 0x71848a,
+            metalness: 0.92,
+            roughness: 0.22,
+            emissive: 0x102529,
+            emissiveIntensity: 0.7
+        });
+        const glass = new THREE.MeshStandardMaterial({
+            color: 0x38aeb0,
+            metalness: 0.45,
+            roughness: 0.18,
+            transparent: true,
+            opacity: 0.2,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+        const inactiveGlow = new THREE.MeshBasicMaterial({ color: 0xff7b24 });
+        const activeGlow = new THREE.MeshBasicMaterial({ color: 0x00f5ff });
+
+        const addBox = (width, height, depth, x, y, z, material, collides = false) => {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+            mesh.position.set(x, y, z);
+            pod.add(mesh);
+            if (collides) {
+                mesh.updateWorldMatrix(true, false);
+                this.wallHitboxes.push(new THREE.Box3().setFromObject(mesh));
+            }
+            return mesh;
+        };
+
+        addBox(9.4, 0.24, 9.4, 0, 0.12, 0, steel);
+        addBox(9.8, 0.08, 9.8, 0, 0.26, 0, trim);
+
+        [-4.45, 4.45].forEach(x => {
+            addBox(0.3, 3.5, 9.0, x, 1.95, 0, glass, true);
+            addBox(0.55, 3.9, 0.55, x, 2.05, -4.15, steel);
+            addBox(0.55, 3.9, 0.55, x, 2.05, 4.15, steel);
+            addBox(0.48, 0.18, 8.9, x, 0.45, 0, trim);
+            addBox(0.48, 0.18, 8.9, x, 3.35, 0, trim);
+        });
+
+        addBox(9.0, 3.5, 0.3, 0, 1.95, -4.45, glass, true);
+        addBox(9.0, 0.18, 0.48, 0, 0.45, -4.45, trim);
+        addBox(9.0, 0.18, 0.48, 0, 3.35, -4.45, trim);
+
+        // The south side stays open as the pod entrance.
+        addBox(2.9, 3.5, 0.3, -3.45, 1.95, 4.45, glass, true);
+        addBox(2.9, 3.5, 0.3, 3.45, 1.95, 4.45, glass, true);
+        addBox(2.9, 0.18, 0.48, -3.45, 0.45, 4.45, trim);
+        addBox(2.9, 0.18, 0.48, 3.45, 0.45, 4.45, trim);
+
+        const podDoorMaterial = glass.clone();
+        podDoorMaterial.opacity = 0.36;
+        [-1, 1].forEach(direction => {
+            const panel = new THREE.Mesh(new THREE.BoxGeometry(2.05, 3.42, 0.12), podDoorMaterial);
+            panel.position.set(direction * 1.025, 1.95, 4.3);
+            pod.add(panel);
+            this.podDoorPanels.push({ mesh: panel, direction });
+        });
+        this.podDoorProgress = 0;
+        this.podDoorTarget = 0;
+
+        const roof = new THREE.Mesh(new THREE.BoxGeometry(9.5, 0.28, 9.5), steel);
+        roof.position.set(0, 3.85, 0);
+        pod.add(roof);
+
+        const ceilingRing = new THREE.Mesh(new THREE.TorusGeometry(3.55, 0.12, 10, 48), trim);
+        ceilingRing.rotation.x = Math.PI / 2;
+        ceilingRing.position.y = 4.06;
+        pod.add(ceilingRing);
+
+        const rotor = new THREE.Group();
+        rotor.position.set(0, 4.12, 0);
+        const rotorRing = new THREE.Mesh(new THREE.TorusGeometry(2.65, 0.075, 8, 40), inactiveGlow);
+        rotorRing.rotation.x = Math.PI / 2;
+        rotor.add(rotorRing);
+        const rotorCrossbar = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.06, 0.12), inactiveGlow);
+        rotor.add(rotorCrossbar);
+        pod.add(rotor);
+        this.podRotor = rotor;
+
+        this.podStatusTexture = new THREE.TextureLoader().load(
+            'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/77c84b40fe1dd0680dfd1262d700c45f3245c1f0/logo%20trans.png',
+            undefined,
+            undefined,
+            (error) => console.warn('[KRONOS] OmniCorp logó betöltése sikertelen:', error)
+        );
+        this.podStatusTexture.encoding = THREE.sRGBEncoding;
+        const screenMaterial = new THREE.MeshBasicMaterial({ map: this.podStatusTexture });
+        this.podStatusScreen = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 1.35), screenMaterial);
+        this.podStatusScreen.position.set(0, 1.8, -4.12);
+        pod.add(this.podStatusScreen);
+
+        const statusPanel = new THREE.Mesh(new THREE.BoxGeometry(2.9, 1.55, 0.08), steel);
+        statusPanel.position.set(0, 1.8, -4.26);
+        pod.add(statusPanel);
+
+        const entryFrame = new THREE.Group();
+        [
+            { x: -1.7, y: 2.0, width: 0.22, height: 4.0 },
+            { x: 1.7, y: 2.0, width: 0.22, height: 4.0 },
+            { x: 0, y: 3.95, width: 3.62, height: 0.22 }
+        ].forEach(part => {
+            const bar = new THREE.Mesh(new THREE.BoxGeometry(part.width, part.height, 0.24), trim);
+            bar.position.set(part.x, part.y, 4.42);
+            entryFrame.add(bar);
+        });
+        const entryIndicator = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.08, 0.08), inactiveGlow);
+        entryIndicator.position.set(0, 3.78, 4.29);
+        entryFrame.add(entryIndicator);
+        pod.add(entryFrame);
+
+        const powerLight = new THREE.PointLight(0xff7b24, 1.1, 14, 2);
+        powerLight.position.set(0, 3.6, 0);
+        pod.add(powerLight);
+        this.podPowerLight = powerLight;
+        this.podGlowMaterials = { inactive: inactiveGlow, active: activeGlow };
+        this.podEntryIndicator = entryIndicator;
+        this.regenerationPod = pod;
+        this.scene.add(pod);
+        this.setTerminalActive(false);
+    }
+
+    setTerminalActive(isActive) {
+        this.isTerminalActive = isActive;
+        if (this.podStatusScreen) {
+            this.podStatusScreen.material.color.setHex(isActive ? 0xffffff : 0xb4b4b4);
+        }
+
+        if (this.podEntryIndicator && this.podGlowMaterials) {
+            this.podEntryIndicator.material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
+        }
+        if (this.podPowerLight) {
+            this.podPowerLight.color.setHex(isActive ? 0x00f5ff : 0xff7b24);
+            this.podPowerLight.intensity = isActive ? 2.2 : 0.85;
+        }
+        if (this.podRotor && this.podGlowMaterials) {
+            this.podRotor.children[0].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
+            this.podRotor.children[1].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
+        }
+    }
+
+    setPodDoorOpen(isOpen) {
+        this.podDoorTarget = isOpen ? 1 : 0;
+    }
+
     // --- LIFT KÖRNYEZETI MOZGÁS VEZÉRLÉS ---
     startElevator() {
         this.isElevatorMoving = true;
@@ -750,6 +915,24 @@ class LevelManager {
     }
 
     update(delta) {
+        if (this.podDoorPanels.length) {
+            this.podDoorProgress = THREE.MathUtils.damp(this.podDoorProgress, this.podDoorTarget, 5, delta);
+            if (Math.abs(this.podDoorProgress - this.podDoorTarget) < 0.005) {
+                this.podDoorProgress = this.podDoorTarget;
+            }
+            for (const panel of this.podDoorPanels) {
+                panel.mesh.position.x = panel.direction * (1.025 + this.podDoorProgress * 2.1);
+            }
+        }
+        if (this.podRotor) {
+            this.podAnimationTime += delta;
+            this.podRotor.rotation.y += delta * (this.isTerminalActive ? 1.15 : 0.35);
+            if (this.podPowerLight) {
+                const pulse = 0.9 + Math.sin(this.podAnimationTime * (this.isTerminalActive ? 3.4 : 1.2)) * 0.18;
+                this.podPowerLight.intensity = (this.isTerminalActive ? 2.2 : 0.85) * pulse;
+            }
+        }
+
         // 0. Flush Zsilipfedő Panelek (Transit Shutters) és Kapuk szinkronizálása:
         // Liftezés alatt a fedőpanelek tökéletesen a fal belső síkjában fedik a nyílásokat,
         // 100%-ban szinkronban görgőzve a fallal (nincs külön elmozdulás vagy textúra-elcsúszás).
@@ -925,6 +1108,13 @@ class LevelManager {
             const d = this.doors[i];
             if (d.progress < 0.8 && !d.hitbox.isEmpty()) {
                 if (this.collisionBoxOverlapsAabb(d.hitbox, minX, maxX, minZ, maxZ)) return true;
+            }
+        }
+        if (this.podDoorProgress < 0.98) {
+            for (const panel of this.podDoorPanels) {
+                panel.mesh.updateWorldMatrix(true, false);
+                const box = new THREE.Box3().setFromObject(panel.mesh);
+                if (this.collisionBoxOverlapsAabb(box, minX, maxX, minZ, maxZ)) return true;
             }
         }
         return false;

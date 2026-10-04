@@ -199,7 +199,7 @@ export class Player {
         this.lastWhisperVolume = null;
 
         if (this.camera) {
-            this.camera.position.set(0, 1.6, 0);
+            this.camera.position.set(0, 1.6, 10);
         }
 
         document.body.classList.remove('drugged', 'infected-mild', 'infected-medium', 'infected-severe');
