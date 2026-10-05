@@ -273,6 +273,8 @@
                     <div class="shop-tabs"
                         style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #003333; padding-bottom: 10px; justify-content: center; width: 100%;">
                         <button id="tab-weapons" class="tab-btn active">FEGYVEREK</button>
+                        <button id="tab-ammo" class="tab-btn" style="display: none;">LŐSZER</button>
+                        <button id="tab-special" class="tab-btn" style="display: none;">SPECIÁLIS</button>
                         <button id="tab-skills" class="tab-btn">FEJLESZTÉSEK</button>
                         <button id="tab-directives" class="tab-btn">DIREKTÍVÁK</button>
                         <button id="tab-archive-ingame" class="tab-btn" style="margin-left: 20px;">KÓDEX</button>
@@ -315,29 +317,31 @@
                             <button id="buy-shotgun" class="shop-btn"></button>
                             <button id="buy-rifle" class="shop-btn"></button>
                             <button id="buy-super" class="shop-btn"></button>
-                            <button id="buy-ammo" class="shop-btn"></button>
                             <button id="buy-medkit" class="shop-btn"></button>
                             <button id="buy-health" class="shop-btn"></button>
                             <button id="buy-armor" class="shop-btn"></button>
-                            <button id="buy-clean" class="shop-btn" style="grid-column: 1 / -1;"></button>
                             <button id="buy-infection-clean" class="shop-btn" style="grid-column: 1 / -1; display: none;"></button>
-                            <button id="buy-resonator" class="shop-btn" style="grid-column: 1 / -1;"></button>
-                        </div>
-                        <div id="ammo-purchase-panel" class="hidden"
-                            style="margin-top: 14px; padding: 14px; border: 1px solid #00aaaa; background: rgba(0, 25, 25, 0.75); color: #00ffff; font-family: 'Share Tech Mono', monospace;">
-                            <div style="margin-bottom: 10px; letter-spacing: 2px;">FEGYVERENKÉNTI LŐSZERUTÁNPÓTLÁS</div>
-                            <div class="ammo-card-section">
-                                <div class="ammo-card-heading">FEGYVER</div>
-                                <div id="ammo-weapon-cards" class="ammo-card-grid"></div>
-                            </div>
-                            <div class="ammo-card-section">
-                                <div class="ammo-card-heading">UTÁNTÖLTÉS // VÁLASZD KI A MENNYISÉGET</div>
-                                <div id="ammo-refill-cards" class="ammo-card-grid ammo-refill-grid"></div>
-                            </div>
                         </div>
                         <div class="terminal-sub"
                             style="color: #ff5555; border-color: #550000; margin-top: 15px; margin-bottom: 0;">
                             SZENNYEZETTSÉG: <span id="puddle-count">0</span> POCSOLYA</div>
+                    </div>
+
+                    <div id="shop-ammo" class="shop-tab-content hidden">
+                        <div id="ammo-purchase-panel" class="ammo-purchase-panel">
+                            <div class="ammo-panel-heading">LŐSZERUTÁNPÓTLÁS // A SZÁZALÉKOK A HIÁNYZÓ TARTALÉKRA VONATKOZNAK</div>
+                            <div id="ammo-weapon-cards" class="ammo-weapon-grid"></div>
+                        </div>
+                    </div>
+
+                    <div id="shop-special" class="shop-tab-content hidden">
+                        <div class="shop-grid">
+                            <button id="buy-resonator" class="shop-btn" style="grid-column: 1 / -1;"></button>
+                            <button id="buy-clean" class="shop-btn" style="grid-column: 1 / -1;"></button>
+                        </div>
+                        <div class="terminal-sub"
+                            style="color: #ff5555; border-color: #550000; margin-top: 15px; margin-bottom: 0;">
+                            SZENNYEZETTSÉG: <span id="special-puddle-count">0</span> POCSOLYA</div>
                     </div>
 
                     <!-- Képességek (Már nem nyúlnak meg, mert nincsenek flex-nyújtásra állítva!) -->

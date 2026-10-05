@@ -18,7 +18,6 @@ class UIManager {
         this.waveBriefingTimeout = null;
         this.commsConversations = new Map();
         this.selectedArmoryWeapon = 'pistol';
-        this.selectedAmmoWeapon = 'pistol';
 
         // Globális függvények az inline onclick eseményekhez
         this.loreAudio = null;
@@ -1247,24 +1246,42 @@ class UIManager {
         }
 
         const tabWeaponsBtn = document.getElementById('tab-weapons');
+        const tabAmmoBtn = document.getElementById('tab-ammo');
+        const tabSpecialBtn = document.getElementById('tab-special');
         const tabSkillsBtn = document.getElementById('tab-skills');
         const tabDirectivesBtn = document.getElementById('tab-directives');
 
         const shopWeaponsDiv = document.getElementById('shop-weapons');
+        const shopAmmoDiv = document.getElementById('shop-ammo');
+        const shopSpecialDiv = document.getElementById('shop-special');
         const shopSkillsDiv = document.getElementById('shop-skills');
         const shopDirectivesDiv = document.getElementById('shop-directives');
 
         const resetShopTabs = () => {
             if (tabWeaponsBtn) tabWeaponsBtn.classList.remove('active');
+            if (tabAmmoBtn) tabAmmoBtn.classList.remove('active');
+            if (tabSpecialBtn) tabSpecialBtn.classList.remove('active');
             if (tabSkillsBtn) tabSkillsBtn.classList.remove('active');
             if (tabDirectivesBtn) tabDirectivesBtn.classList.remove('active');
             if (shopWeaponsDiv) shopWeaponsDiv.classList.add('hidden');
+            if (shopAmmoDiv) shopAmmoDiv.classList.add('hidden');
+            if (shopSpecialDiv) shopSpecialDiv.classList.add('hidden');
             if (shopSkillsDiv) shopSkillsDiv.classList.add('hidden');
             if (shopDirectivesDiv) shopDirectivesDiv.classList.add('hidden');
         };
 
         if (tabWeaponsBtn && tabSkillsBtn && tabDirectivesBtn) {
             tabWeaponsBtn.addEventListener('click', () => { resetShopTabs(); tabWeaponsBtn.classList.add('active'); shopWeaponsDiv.classList.remove('hidden'); });
+            tabAmmoBtn?.addEventListener('click', () => {
+                resetShopTabs();
+                tabAmmoBtn.classList.add('active');
+                shopAmmoDiv?.classList.remove('hidden');
+            });
+            tabSpecialBtn?.addEventListener('click', () => {
+                resetShopTabs();
+                tabSpecialBtn.classList.add('active');
+                shopSpecialDiv?.classList.remove('hidden');
+            });
             tabSkillsBtn.addEventListener('click', () => { resetShopTabs(); tabSkillsBtn.classList.add('active'); shopSkillsDiv.classList.remove('hidden'); });
             tabDirectivesBtn.addEventListener('click', () => {
                 this.omniDirOpenedFrom = 'shopMenu';
@@ -1365,15 +1382,27 @@ class UIManager {
         if (penaltyDiv) penaltyDiv.style.display = 'none';
 
         const tabWeaponsBtn = document.getElementById('tab-weapons');
+        const tabAmmoBtn = document.getElementById('tab-ammo');
+        const tabSpecialBtn = document.getElementById('tab-special');
         const tabSkillsBtn = document.getElementById('tab-skills');
         const tabDirectivesBtn = document.getElementById('tab-directives');
         const shopWeaponsDiv = document.getElementById('shop-weapons');
+        const shopAmmoDiv = document.getElementById('shop-ammo');
+        const shopSpecialDiv = document.getElementById('shop-special');
         const shopSkillsDiv = document.getElementById('shop-skills');
         const shopDirectivesDiv = document.getElementById('shop-directives');
-        if (tabWeaponsBtn) tabWeaponsBtn.classList.add('active');
+        const isLiftTerminal = Boolean(this.activeShopContext?.terminal && !this.activeShopContext?.hub);
+        const keepAmmoTab = Boolean(isLiftTerminal && tabAmmoBtn?.classList.contains('active'));
+        const keepSpecialTab = Boolean(isLiftTerminal && tabSpecialBtn?.classList.contains('active'));
+        const keepLiftSubTab = keepAmmoTab || keepSpecialTab;
+        if (tabWeaponsBtn) tabWeaponsBtn.classList.toggle('active', !keepLiftSubTab && data.researchTab !== 'skills');
+        if (tabAmmoBtn) tabAmmoBtn.classList.toggle('active', keepAmmoTab);
+        if (tabSpecialBtn) tabSpecialBtn.classList.toggle('active', keepSpecialTab);
         if (tabSkillsBtn) tabSkillsBtn.classList.remove('active');
         if (tabDirectivesBtn) tabDirectivesBtn.classList.remove('active');
-        if (shopWeaponsDiv) shopWeaponsDiv.classList.toggle('hidden', data.researchTab === 'skills');
+        if (shopWeaponsDiv) shopWeaponsDiv.classList.toggle('hidden', keepLiftSubTab || data.researchTab === 'skills');
+        if (shopAmmoDiv) shopAmmoDiv.classList.toggle('hidden', !keepAmmoTab);
+        if (shopSpecialDiv) shopSpecialDiv.classList.toggle('hidden', !keepSpecialTab);
         if (shopSkillsDiv) shopSkillsDiv.classList.toggle('hidden', data.researchTab !== 'skills');
         if (shopDirectivesDiv) shopDirectivesDiv.classList.add('hidden');
         if (data.researchTab === 'skills') {
@@ -1416,6 +1445,7 @@ class UIManager {
             this.defaultTerminalBorder = screen.style.borderColor;
         }
         const theme = data.hub && data.researchStation ? this.researchStationThemes[data.researchStation] : null;
+        const isLiftTerminal = Boolean(this.activeShopContext?.terminal && !this.activeShopContext?.hub);
         const allButtons = document.querySelectorAll('#shop-weapons .shop-btn');
         const weaponsDiv = document.getElementById('shop-weapons');
         const weaponGrid = document.querySelector('#shop-weapons > .shop-grid');
@@ -1424,6 +1454,10 @@ class UIManager {
         const statsBar = document.getElementById('shop-points') ? document.getElementById('shop-points').parentNode.parentNode : null;
         const weaponBar = document.getElementById('shop-weapon-switches') ? document.getElementById('shop-weapon-switches').parentNode : null;
         const tabsBar = document.querySelector('.shop-tabs');
+        const ammoTab = document.getElementById('tab-ammo');
+        const ammoView = document.getElementById('shop-ammo');
+        const specialTab = document.getElementById('tab-special');
+        const specialView = document.getElementById('shop-special');
         const puddleInfo = document.getElementById('puddle-count') ? document.getElementById('puddle-count').parentNode : null;
         let subtitle = document.getElementById('station-subtitle');
         let commsPanel = document.getElementById('comms-panel');
@@ -1437,10 +1471,13 @@ class UIManager {
             allButtons.forEach(button => { if (button.id !== 'buy-infection-clean') button.style.display = ''; });
             if (puddleInfo) puddleInfo.style.display = '';
             document.getElementById('armory-customizer')?.classList.add('hidden');
-            if (data.terminal) {
+            if (isLiftTerminal) {
                 this.applyLiftTerminalLayout();
             } else {
-                document.getElementById('ammo-purchase-panel')?.classList.add('hidden');
+                ammoTab?.style.setProperty('display', 'none');
+                ammoView?.classList.add('hidden');
+                specialTab?.style.setProperty('display', 'none');
+                specialView?.classList.add('hidden');
                 const weaponsTab = document.getElementById('tab-weapons');
                 if (weaponsTab) weaponsTab.textContent = 'FEGYVEREK';
             }
@@ -1460,6 +1497,10 @@ class UIManager {
         subtitle.style.color = theme.color;
         subtitle.textContent = theme.sub;
         if (tabsBar) tabsBar.style.display = 'none';
+        ammoTab?.style.setProperty('display', 'none');
+        ammoView?.classList.add('hidden');
+        specialTab?.style.setProperty('display', 'none');
+        specialView?.classList.add('hidden');
 
         if (data.researchStation === 'comms') {
             if (weaponGrid) weaponGrid.style.display = '';
@@ -1483,11 +1524,9 @@ class UIManager {
             if (weaponBar) weaponBar.style.display = 'none';
             if (weaponsDiv) weaponsDiv.classList.add('hidden');
             if (skillsDiv) skillsDiv.classList.remove('hidden');
-            document.getElementById('ammo-purchase-panel')?.classList.add('hidden');
             return;
         }
 
-        document.getElementById('ammo-purchase-panel')?.classList.add('hidden');
         if (data.researchStation === 'armory') {
             const armoryCustomizer = document.getElementById('armory-customizer');
             armoryCustomizer?.classList.remove('hidden');
@@ -1511,24 +1550,35 @@ class UIManager {
 
     applyLiftTerminalLayout() {
         const visibleSupplyButtons = new Set([
-            'buy-ammo', 'buy-armor', 'buy-health', 'buy-clean', 'buy-medkit', 'buy-resonator'
+            'buy-armor', 'buy-health', 'buy-medkit'
         ]);
         document.querySelectorAll('#shop-weapons .shop-btn').forEach(button => {
             button.style.display = visibleSupplyButtons.has(button.id) ? '' : 'none';
         });
-        document.getElementById('shop-weapons')?.classList.remove('hidden');
+        const subTabActive = document.getElementById('tab-ammo')?.classList.contains('active') ||
+            document.getElementById('tab-special')?.classList.contains('active');
+        document.getElementById('shop-weapons')?.classList.toggle('hidden', Boolean(subTabActive));
         document.getElementById('shop-skills')?.classList.add('hidden');
         document.getElementById('shop-directives')?.classList.add('hidden');
+        document.getElementById('puddle-count')?.parentElement?.style.setProperty('display', 'none');
         document.getElementById('shop-weapon-switches')?.parentElement?.style.setProperty('display', 'none');
         const armoryCustomizer = document.getElementById('armory-customizer');
         if (armoryCustomizer) armoryCustomizer.classList.add('hidden');
 
         const weaponsTab = document.getElementById('tab-weapons');
+        const ammoTab = document.getElementById('tab-ammo');
+        const ammoView = document.getElementById('shop-ammo');
+        const specialTab = document.getElementById('tab-special');
+        const specialView = document.getElementById('shop-special');
         const skillsTab = document.getElementById('tab-skills');
         if (weaponsTab) {
             weaponsTab.textContent = 'ELLÁTÁS';
             weaponsTab.style.display = '';
         }
+        if (ammoTab) ammoTab.style.display = '';
+        if (ammoView && !ammoTab?.classList.contains('active')) ammoView.classList.add('hidden');
+        if (specialTab) specialTab.style.display = '';
+        if (specialView && !specialTab?.classList.contains('active')) specialView.classList.add('hidden');
         if (skillsTab) skillsTab.style.display = 'none';
         const tabs = document.querySelector('.shop-tabs');
         if (tabs) tabs.style.display = 'flex';
@@ -1897,28 +1947,6 @@ class UIManager {
             btn.onclick = () => EventBus.emit('TRY_BUY_SKILL', { id: sData.id, price: s.baseCost * (s.level + 1) });
         });
 
-        // Gyorsműveletek (Eseményt küldünk)
-        const ammoBtn = document.getElementById('buy-ammo');
-        const ammoPanel = document.getElementById('ammo-purchase-panel');
-        if (ammoBtn) {
-            ammoBtn.classList.add('btn-action');
-            const needsAmmo = Object.entries(data.weapons).some(([id, weapon]) =>
-                id !== 'melee' && weapon.owned && weapon.reserve < weapon.maxReserve
-            );
-            if (!needsAmmo) {
-                ammoBtn.innerHTML = this.getBtnHTML("LŐSZER UTÁNPÓTLÁS", "", "Minden fegyver tartaléka maximális.", "NINCS TEENDŐ");
-                ammoBtn.disabled = true;
-            } else {
-                ammoBtn.innerHTML = this.getBtnHTML("LŐSZER UTÁNPÓTLÁS", "", "Válassz fegyvert és utántöltési szintet.", "25% · 50% · 75% · 100%");
-                ammoBtn.disabled = false;
-            }
-            ammoBtn.onclick = () => {
-                if (ammoPanel) ammoPanel.classList.toggle('hidden');
-                if (ammoPanel && !ammoPanel.classList.contains('hidden')) {
-                    this.renderAmmoPurchaseOptions(data);
-                }
-            };
-        }
         this.renderAmmoPurchaseOptions(data);
 
         const medkitBtn = document.getElementById('buy-medkit');
@@ -2021,6 +2049,8 @@ class UIManager {
         const puddleCount = data.sterilizationPuddleCount ?? data.toxicPuddlesCount;
         const puddleCountDisplay = document.getElementById('puddle-count');
         if (puddleCountDisplay) puddleCountDisplay.innerText = puddleCount;
+        const specialPuddleDisplay = document.getElementById('special-puddle-count');
+        if (specialPuddleDisplay) specialPuddleDisplay.innerText = puddleCount;
 
         const cleanBtn = document.getElementById('buy-clean');
         if (cleanBtn) {
@@ -2043,51 +2073,70 @@ class UIManager {
     }
 
     renderAmmoPurchaseOptions(data) {
-        const panel = document.getElementById('ammo-purchase-panel');
         const weaponCards = document.getElementById('ammo-weapon-cards');
-        const refillCards = document.getElementById('ammo-refill-cards');
-        if (!panel || !weaponCards || !refillCards) return;
-        const availableWeapons = Object.entries(ammoPrices)
-            .filter(([id]) => {
-                const weapon = data.weapons[id];
-                return weapon && weapon.owned && weapon.reserve < weapon.maxReserve;
-            });
-        if (!availableWeapons.some(([id]) => id === this.selectedAmmoWeapon)) {
-            this.selectedAmmoWeapon = availableWeapons[0]?.[0] || null;
-        }
-        weaponCards.replaceChildren(...availableWeapons.map(([id, price]) => {
-            const weapon = data.weapons[id];
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = `ammo-choice-card${id === this.selectedAmmoWeapon ? ' selected' : ''}`;
-            card.setAttribute('aria-pressed', String(id === this.selectedAmmoWeapon));
-            card.innerHTML = `<strong>${weapon.name}</strong><span>${weapon.reserve} / ${weapon.maxReserve} tartalék</span><em>${price} CR / lőszer</em>`;
-            card.addEventListener('click', () => {
-                this.selectedAmmoWeapon = id;
-                this.renderAmmoPurchaseOptions(this.lastShopData || data);
-            });
-            return card;
-        }));
-        if (!availableWeapons.length) {
-            panel.classList.add('hidden');
-            refillCards.replaceChildren();
+        if (!weaponCards || !data?.weapons) return;
+        const ownedWeapons = Object.entries(ammoPrices)
+            .filter(([id]) => data.weapons[id]?.owned);
+        if (!ownedWeapons.length) {
+            const emptyState = document.createElement('p');
+            emptyState.className = 'ammo-empty-state';
+            emptyState.textContent = 'NINCS ENGEDÉLYEZETT FEGYVER LŐSZERUTÁNTÖLTÉSHEZ.';
+            weaponCards.replaceChildren(emptyState);
             return;
         }
 
-        const weapon = data.weapons[this.selectedAmmoWeapon];
-        const missing = weapon.maxReserve - weapon.reserve;
-        refillCards.replaceChildren(...[25, 50, 75, 100].map(percent => {
-            const amount = Math.min(missing, Math.max(1, Math.ceil(missing * percent / 100)));
-            const cost = amount * ammoPrices[this.selectedAmmoWeapon];
-            const card = document.createElement('button');
-            card.type = 'button';
-            card.className = 'ammo-choice-card ammo-refill-card';
-            card.disabled = data.score < cost;
-            card.innerHTML = `<strong>${percent}%</strong><span>+${amount} lőszer</span><em>${cost} CR</em>`;
-            card.addEventListener('click', () => EventBus.emit('TRY_BUY_AMMO', {
-                weaponId: this.selectedAmmoWeapon,
-                amount
-            }));
+        weaponCards.replaceChildren(...ownedWeapons.map(([id, price]) => {
+            const weapon = data.weapons[id];
+            const missing = Math.max(0, weapon.maxReserve - weapon.reserve);
+            const card = document.createElement('article');
+            card.className = `ammo-weapon-card${missing === 0 ? ' full' : ''}`;
+
+            const image = document.createElement('img');
+            image.className = 'ammo-weapon-image';
+            image.src = weapon.image;
+            image.alt = '';
+            image.loading = 'lazy';
+            card.appendChild(image);
+
+            const name = document.createElement('h3');
+            name.className = 'ammo-weapon-name';
+            name.textContent = weapon.name;
+            card.appendChild(name);
+
+            const stock = document.createElement('div');
+            stock.className = 'ammo-weapon-stock';
+            stock.textContent = missing > 0
+                ? `TARTALÉK ${weapon.reserve} / ${weapon.maxReserve}`
+                : `TARTALÉK MAXIMUMON · ${weapon.reserve} / ${weapon.maxReserve}`;
+            card.appendChild(stock);
+
+            const priceLabel = document.createElement('div');
+            priceLabel.className = 'ammo-weapon-price';
+            priceLabel.textContent = `${price} CR / LŐSZER`;
+            card.appendChild(priceLabel);
+
+            const options = document.createElement('div');
+            options.className = 'ammo-refill-options';
+            [25, 50, 75, 100].forEach(percent => {
+                const amount = missing > 0 ? Math.ceil(missing * percent / 100) : 0;
+                const cost = amount * price;
+                const option = document.createElement('button');
+                option.type = 'button';
+                option.className = 'ammo-refill-option';
+                option.disabled = missing === 0 || data.score < cost;
+                option.setAttribute('aria-label', missing > 0
+                    ? `${weapon.name}: a hiányzó lőszer ${percent} százaléka, ${amount} lőszer, ${cost} kredit`
+                    : `${weapon.name}: a tartalék lőszerkészlet már maximális`);
+                option.innerHTML = missing > 0
+                    ? `<strong>${percent}%</strong><span>+${amount} db</span><em>${cost} CR</em>`
+                    : `<strong>${percent}%</strong><span>MAX</span><em>—</em>`;
+                option.addEventListener('click', () => EventBus.emit('TRY_BUY_AMMO', {
+                    weaponId: id,
+                    amount
+                }));
+                options.appendChild(option);
+            });
+            card.appendChild(options);
             return card;
         }));
     }
