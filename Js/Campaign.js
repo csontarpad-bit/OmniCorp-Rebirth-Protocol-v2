@@ -42,7 +42,7 @@ export const researchCommsLog = {
     50: { signal: 'GYENGE', mood: 'tired', text: 'Nehezedik a helyzet... *köhögés* Valami bejutott a szellőzőmbe. A Regenerációs Kamrák odalent már nem működnek, csak a te szinteden. Használd ki!' },
     60: { signal: 'ZAVAROS', mood: 'tired', text: 'Két Nexus Node védi a következő zsilipet. Ne hagyd, hogy bekerítsenek. Siess, ECHO... nincs sok időm.' },
     70: { signal: 'ZAVAROS', mood: 'glitch', text: 'A Kaptártudat már a falakon keresztül is figyel. Hallom, ahogy kattog a vezetékekben... Maradj tiszta, bármi áron.' },
-    80: { signal: 'TORZ', mood: 'glitch', text: 'ECHO... *köhögés* A gépnek igaza volt. Én is a hálózat része vagyok már. De még tartom az ajtót a Maghoz. Vedd fel a Szuper Fegyvert az asztalról.' },
+    80: { signal: 'TORZ', mood: 'glitch', text: 'ECHO... *köhögés* A gépnek igaza volt. Én is a hálózat része vagyok már. De még tartom az ajtót a Maghoz. Vedd fel a Revolvert az asztalról.' },
     90: { signal: 'TORZ', mood: 'glitch', text: 'A Mag közel van. A következő megálló lesz az utolsó. Három Node tartja zárva a kaput. Lőjj át mindenen... rajtam is.' },
     100: { signal: 'MEGSZAKADT', mood: 'glitch', text: 'Három Node tartja zárva a Magot. ECHO... fejezd be. Öld meg a Nexust.' }
 };

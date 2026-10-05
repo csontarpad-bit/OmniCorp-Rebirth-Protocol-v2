@@ -271,6 +271,67 @@ body:has(#game-over:not(.hidden)) #screen-blood {
    ========================================== */
 .shop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; width: 100%; }
 
+#armory-customizer { color: #dffbff; font-family: 'Share Tech Mono', monospace; }
+.armory-weapon-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.armory-weapon-tab {
+    min-height: 42px; padding: 8px; border: 1px solid #28505a; background: rgba(5, 20, 27, 0.9);
+    color: #85aab3; font: inherit; font-size: 13px; letter-spacing: 1px; cursor: pointer;
+}
+.armory-weapon-tab.active { border-color: #00eaff; color: #fff; background: rgba(0, 116, 135, 0.3); box-shadow: 0 0 14px rgba(0, 234, 255, 0.2), inset 0 0 12px rgba(0, 234, 255, 0.08); }
+.armory-mod-layout {
+    position: relative; display: grid; grid-template-columns: minmax(165px, 1fr) minmax(220px, 1.4fr) minmax(165px, 1fr);
+    align-items: stretch; gap: 12px; min-height: 320px; padding: 10px 0;
+}
+.armory-mod-cards { display: contents; }
+.armory-mod-side { z-index: 2; display: flex; flex-direction: column; justify-content: space-around; gap: 12px; }
+.armory-mod-left { grid-column: 1; grid-row: 1; }
+.armory-mod-right { grid-column: 3; grid-row: 1; }
+.armory-mod-card {
+    display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 6px; min-height: 105px; padding: 12px;
+    border: 1px solid rgba(0, 225, 245, 0.38); background: linear-gradient(135deg, rgba(8, 29, 38, 0.96), rgba(3, 10, 16, 0.94));
+    color: inherit; font: inherit; text-align: left;
+    box-shadow: inset 0 0 20px rgba(0, 225, 245, 0.035), 0 5px 18px rgba(0, 0, 0, 0.28);
+}
+.armory-mod-index { color: #00d9e9; font-size: 10px; letter-spacing: 1px; }
+.armory-mod-card strong { color: #f2fcff; font-size: 14px; letter-spacing: 1px; }
+.armory-mod-card > span:not(.armory-mod-index) { color: #9cb3ba; font-size: 12px; }
+.armory-mod-card em { color: #60747c; font-size: 10px; font-style: normal; letter-spacing: 1px; }
+.armory-mod-card { transition: border-color 0.2s, box-shadow 0.2s; }
+.armory-mod-card.installed { border-color: rgba(0, 255, 166, 0.45); }
+.armory-mod-card.installed em { color: #00e89a; }
+.armory-mod-card.next { border-color: #00d9e9; box-shadow: inset 0 0 20px rgba(0, 225, 245, 0.08), 0 0 15px rgba(0, 225, 245, 0.1); }
+.armory-mod-card.next em { color: #00eaff; }
+.armory-mod-card.next:hover:not(:disabled) { background: linear-gradient(135deg, rgba(0, 83, 96, 0.96), rgba(3, 10, 16, 0.94)); cursor: pointer; }
+.armory-mod-card:disabled { opacity: 0.62; }
+.armory-preview-stage {
+    position: relative; z-index: 1; grid-column: 2; grid-row: 1; display: flex; min-width: 0; min-height: 300px; align-items: center; justify-content: center;
+    overflow: hidden; border: 1px solid rgba(0, 217, 233, 0.16);
+    background: radial-gradient(ellipse at 50% 52%, rgba(0, 192, 218, 0.13), rgba(0, 12, 20, 0.1) 48%, transparent 76%);
+}
+#armory-weapon-image { width: 88%; height: 78%; object-fit: contain; }
+#armory-unlock-card { position: absolute; z-index: 3; bottom: 42px; padding: 10px 16px; border: 1px solid #00eaff; background: rgba(0, 20, 25, 0.94); color: #00eaff; font: inherit; letter-spacing: 1px; cursor: pointer; }
+#armory-unlock-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.armory-preview-reticle {
+    position: absolute; width: 154px; height: 154px; border: 1px solid rgba(0, 217, 233, 0.22); border-radius: 50%;
+    box-shadow: 0 0 25px rgba(0, 217, 233, 0.08), inset 0 0 20px rgba(0, 217, 233, 0.05); pointer-events: none;
+}
+.armory-preview-label { position: absolute; bottom: 9px; color: #5f969f; font-size: 9px; letter-spacing: 1px; text-align: center; pointer-events: none; }
+.armory-callout-lines { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.armory-callout-lines path { fill: none; stroke: rgba(0, 222, 239, 0.65); stroke-width: 1.4; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.armory-callout-lines circle { fill: #00eaff; filter: drop-shadow(0 0 4px #00eaff); }
+.armory-upgrade-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 12px; padding: 12px; border-top: 1px solid rgba(0, 217, 233, 0.24); background: rgba(2, 15, 22, 0.8); }
+#armory-upgrade-summary { color: #8ba8ae; font-size: 12px; letter-spacing: 1px; }
+.ammo-card-section { margin-top: 12px; }
+.ammo-card-heading { margin-bottom: 8px; color: #84b9be; font-size: 11px; letter-spacing: 1.5px; }
+.ammo-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 8px; }
+.ammo-choice-card { display: flex; min-height: 76px; flex-direction: column; justify-content: center; gap: 5px; padding: 10px; border: 1px solid #15515b; background: rgba(2, 20, 26, 0.95); color: #dffbff; font: inherit; text-align: left; cursor: pointer; }
+.ammo-choice-card strong { color: #00eaff; font-size: 14px; }
+.ammo-choice-card span, .ammo-choice-card em { color: #9cb3ba; font-size: 11px; font-style: normal; }
+.ammo-choice-card.selected, .ammo-choice-card:hover:not(:disabled) { border-color: #00eaff; background: rgba(0, 82, 94, 0.5); }
+.ammo-choice-card:disabled { opacity: 0.45; cursor: not-allowed; }
+.ammo-refill-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ammo-refill-card { min-height: 90px; align-items: center; text-align: center; }
+
 .shop-btn {
     background: rgba(0, 30, 30, 0.6);
     border: 1px solid #005555; 
@@ -321,6 +382,17 @@ body:has(#game-over:not(.hidden)) #screen-blood {
     #terminal-screen { padding: 15px; width: 95%; max-height: 95vh; }
     .terminal-header { font-size: 28px; }
     .item-name { font-size: 18px; }
+    .armory-weapon-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .armory-mod-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: auto; }
+    .armory-preview-stage { grid-column: 1 / -1; grid-row: 1; min-height: 240px; }
+    .armory-mod-left { grid-column: 1; grid-row: 2; }
+    .armory-mod-right { grid-column: 2; grid-row: 2; }
+    .armory-mod-card { min-height: 96px; padding: 9px; }
+    .armory-mod-card strong { font-size: 12px; }
+    .armory-mod-card > span:not(.armory-mod-index) { font-size: 11px; }
+    .armory-callout-lines { display: none; }
+    .armory-upgrade-footer { align-items: stretch; flex-direction: column; }
+    .ammo-refill-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 /* Páncél csík (JAVÍTOTT VERZIÓ) */
 #armor-fill {

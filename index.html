@@ -285,6 +285,31 @@
 
                     <!-- Fegyverek -->
                     <div id="shop-weapons" class="shop-tab-content">
+                        <section id="armory-customizer" class="hidden" aria-label="Fegyvermodifikációs pult">
+                            <div id="armory-weapon-tabs" class="armory-weapon-tabs" role="tablist" aria-label="Fegyver kiválasztása"></div>
+                            <div class="armory-mod-layout">
+                                <svg class="armory-callout-lines" viewBox="0 0 1000 420" preserveAspectRatio="none" aria-hidden="true">
+                                    <path d="M245 90 C340 90 340 145 440 175"></path>
+                                    <path d="M245 315 C335 315 355 245 440 220"></path>
+                                    <path d="M755 90 C660 90 650 145 560 175"></path>
+                                    <path d="M755 315 C660 315 650 245 560 220"></path>
+                                    <circle cx="440" cy="175" r="4"></circle>
+                                    <circle cx="440" cy="220" r="4"></circle>
+                                    <circle cx="560" cy="175" r="4"></circle>
+                                    <circle cx="560" cy="220" r="4"></circle>
+                                </svg>
+                                <div id="armory-mod-cards" class="armory-mod-cards"></div>
+                                <div id="armory-preview-stage" class="armory-preview-stage">
+                                    <img id="armory-weapon-image" alt="Kiválasztott fegyver képe">
+                                    <button id="armory-unlock-card" type="button" class="hidden"></button>
+                                    <div class="armory-preview-reticle"></div>
+                                    <span class="armory-preview-label">R&D // FEGYVERMODIFIKÁCIÓ</span>
+                                </div>
+                            </div>
+                            <div class="armory-upgrade-footer">
+                                <div id="armory-upgrade-summary" aria-live="polite"></div>
+                            </div>
+                        </section>
                         <div class="shop-grid">
                             <button id="buy-pistol" class="shop-btn"></button>
                             <button id="buy-shotgun" class="shop-btn"></button>
@@ -297,6 +322,18 @@
                             <button id="buy-clean" class="shop-btn" style="grid-column: 1 / -1;"></button>
                             <button id="buy-infection-clean" class="shop-btn" style="grid-column: 1 / -1; display: none;"></button>
                             <button id="buy-resonator" class="shop-btn" style="grid-column: 1 / -1;"></button>
+                        </div>
+                        <div id="ammo-purchase-panel" class="hidden"
+                            style="margin-top: 14px; padding: 14px; border: 1px solid #00aaaa; background: rgba(0, 25, 25, 0.75); color: #00ffff; font-family: 'Share Tech Mono', monospace;">
+                            <div style="margin-bottom: 10px; letter-spacing: 2px;">FEGYVERENKÉNTI LŐSZERUTÁNPÓTLÁS</div>
+                            <div class="ammo-card-section">
+                                <div class="ammo-card-heading">FEGYVER</div>
+                                <div id="ammo-weapon-cards" class="ammo-card-grid"></div>
+                            </div>
+                            <div class="ammo-card-section">
+                                <div class="ammo-card-heading">UTÁNTÖLTÉS // VÁLASZD KI A MENNYISÉGET</div>
+                                <div id="ammo-refill-cards" class="ammo-card-grid ammo-refill-grid"></div>
+                            </div>
                         </div>
                         <div class="terminal-sub"
                             style="color: #ff5555; border-color: #550000; margin-top: 15px; margin-bottom: 0;">

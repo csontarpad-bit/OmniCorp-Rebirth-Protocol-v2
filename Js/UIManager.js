@@ -1,6 +1,5 @@
-import * as THREE from 'three';
 import EventBus from './EventBus.js';
-import { OmniCorpDatabase, OmniCorpDirectives, weapons, skills } from './Database.js';
+import { ammoPrices, OmniCorpDatabase, OmniCorpDirectives, weapons, skills } from './Database.js';
 import { playerStats, savePlayerStats } from './RuntimeState.js';
 import { renderArchiveStatHTML } from './UITemplates.js';
 import { getCampaignFloorInfo } from './Campaign.js';
@@ -18,6 +17,8 @@ class UIManager {
         this.waveBriefingInterval = null;
         this.waveBriefingTimeout = null;
         this.commsConversations = new Map();
+        this.selectedArmoryWeapon = 'pistol';
+        this.selectedAmmoWeapon = 'pistol';
 
         // Globális függvények az inline onclick eseményekhez
         this.loreAudio = null;
@@ -71,6 +72,13 @@ class UIManager {
         EventBus.on('SHOW_LOOT_POPUP', (data) => this.showLootPopup(data));
         EventBus.on('SHOW_INTERACT_PROMPT', (data) => this.showInteractPrompt(data));
         EventBus.on('OPEN_SHOP', (data) => this.openShop(data || {}));
+        EventBus.on('RESEARCH_TERMINAL_OPEN', () => {
+            try { if (document.pointerLockElement) document.exitPointerLock(); } catch (error) { console.warn('Could not release pointer lock for the research terminal.', error); }
+        });
+        EventBus.on('RESEARCH_TERMINAL_SESSION_CLOSED', () => {
+            document.getElementById('game-ui-wrapper')?.classList.remove('hidden');
+            this.requestSafePointerLock();
+        });
         EventBus.on('START_GAME', () => this.commsConversations.clear());
         EventBus.on('DEV_FLOOR_TARGET_SET', ({ floor }) => this.updateDevFloorStatus(`${floor}. EMELET BEÁLLÍTVA A KÖVETKEZŐ LIFTÚTHOZ.`));
         EventBus.on('DEV_FLOOR_TARGET_FAILED', () => this.updateDevFloorStatus('ÉRVÉNYTELEN SZINT. 1 ÉS 100 KÖZÖTTI EGÉSZ SZÁMOT ADJ MEG.'));
@@ -208,6 +216,7 @@ class UIManager {
                     this.requestSafePointerLock();
                 }
             }
+
         });
         EventBus.on('TRIGGER_GLITCH', (duration) => {
             const glitchOverlay = document.getElementById('glitch-overlay');
@@ -1278,8 +1287,10 @@ class UIManager {
             closeBtn.addEventListener('click', () => {
                 EventBus.emit('PLAY_SOUND', 'termClose');
                 if (this.shopMenu) this.shopMenu.classList.add('hidden');
-                document.getElementById('game-ui-wrapper').classList.remove('hidden');
-                this.requestSafePointerLock();
+                if (!this.activeShopContext?.hub) {
+                    document.getElementById('game-ui-wrapper').classList.remove('hidden');
+                    this.requestSafePointerLock();
+                }
                 EventBus.emit('CLOSE_SHOP');
             });
         }
@@ -1288,6 +1299,7 @@ class UIManager {
         if (infectionCleanButton) {
             infectionCleanButton.addEventListener('click', () => EventBus.emit('TRY_BUY_NEXUS_PURGE'));
         }
+
     }
 
     openShop(data) {
@@ -1406,6 +1418,7 @@ class UIManager {
         const theme = data.hub && data.researchStation ? this.researchStationThemes[data.researchStation] : null;
         const allButtons = document.querySelectorAll('#shop-weapons .shop-btn');
         const weaponsDiv = document.getElementById('shop-weapons');
+        const weaponGrid = document.querySelector('#shop-weapons > .shop-grid');
         const skillsDiv = document.getElementById('shop-skills');
         const wrapper = document.getElementById('shop-content-wrapper');
         const statsBar = document.getElementById('shop-points') ? document.getElementById('shop-points').parentNode.parentNode : null;
@@ -1420,8 +1433,17 @@ class UIManager {
         if (!theme) {
             screen.style.boxShadow = this.defaultTerminalShadow;
             screen.style.borderColor = this.defaultTerminalBorder;
+            if (weaponGrid) weaponGrid.style.display = '';
             allButtons.forEach(button => { if (button.id !== 'buy-infection-clean') button.style.display = ''; });
             if (puddleInfo) puddleInfo.style.display = '';
+            document.getElementById('armory-customizer')?.classList.add('hidden');
+            if (data.terminal) {
+                this.applyLiftTerminalLayout();
+            } else {
+                document.getElementById('ammo-purchase-panel')?.classList.add('hidden');
+                const weaponsTab = document.getElementById('tab-weapons');
+                if (weaponsTab) weaponsTab.textContent = 'FEGYVEREK';
+            }
             return;
         }
 
@@ -1440,6 +1462,8 @@ class UIManager {
         if (tabsBar) tabsBar.style.display = 'none';
 
         if (data.researchStation === 'comms') {
+            if (weaponGrid) weaponGrid.style.display = '';
+            document.getElementById('armory-customizer')?.classList.add('hidden');
             if (statsBar) statsBar.style.display = 'none';
             if (weaponBar) weaponBar.style.display = 'none';
             if (weaponsDiv) weaponsDiv.classList.add('hidden');
@@ -1454,12 +1478,27 @@ class UIManager {
         }
 
         if (data.researchStation === 'augmentation') {
+            if (weaponGrid) weaponGrid.style.display = '';
+            document.getElementById('armory-customizer')?.classList.add('hidden');
             if (weaponBar) weaponBar.style.display = 'none';
             if (weaponsDiv) weaponsDiv.classList.add('hidden');
             if (skillsDiv) skillsDiv.classList.remove('hidden');
+            document.getElementById('ammo-purchase-panel')?.classList.add('hidden');
             return;
         }
 
+        document.getElementById('ammo-purchase-panel')?.classList.add('hidden');
+        if (data.researchStation === 'armory') {
+            const armoryCustomizer = document.getElementById('armory-customizer');
+            armoryCustomizer?.classList.remove('hidden');
+            if (weaponGrid) weaponGrid.style.display = 'none';
+            if (skillsDiv) skillsDiv.classList.add('hidden');
+            if (weaponsDiv) weaponsDiv.classList.remove('hidden');
+            if (weaponBar) weaponBar.style.display = 'none';
+            this.renderArmoryCustomizer(data);
+            return;
+        }
+        document.getElementById('armory-customizer')?.classList.add('hidden');
         if (skillsDiv) skillsDiv.classList.add('hidden');
         if (weaponsDiv) weaponsDiv.classList.remove('hidden');
         if (data.researchStation === 'regeneration' && weaponBar) weaponBar.style.display = 'none';
@@ -1468,6 +1507,131 @@ class UIManager {
             button.style.display = theme.buttons.includes(button.id) ? '' : 'none';
         });
         if (puddleInfo) puddleInfo.style.display = data.researchStation === 'regeneration' ? '' : 'none';
+    }
+
+    applyLiftTerminalLayout() {
+        const visibleSupplyButtons = new Set([
+            'buy-ammo', 'buy-armor', 'buy-health', 'buy-clean', 'buy-medkit', 'buy-resonator'
+        ]);
+        document.querySelectorAll('#shop-weapons .shop-btn').forEach(button => {
+            button.style.display = visibleSupplyButtons.has(button.id) ? '' : 'none';
+        });
+        document.getElementById('shop-weapons')?.classList.remove('hidden');
+        document.getElementById('shop-skills')?.classList.add('hidden');
+        document.getElementById('shop-directives')?.classList.add('hidden');
+        document.getElementById('shop-weapon-switches')?.parentElement?.style.setProperty('display', 'none');
+        const armoryCustomizer = document.getElementById('armory-customizer');
+        if (armoryCustomizer) armoryCustomizer.classList.add('hidden');
+
+        const weaponsTab = document.getElementById('tab-weapons');
+        const skillsTab = document.getElementById('tab-skills');
+        if (weaponsTab) {
+            weaponsTab.textContent = 'ELLÁTÁS';
+            weaponsTab.style.display = '';
+        }
+        if (skillsTab) skillsTab.style.display = 'none';
+        const tabs = document.querySelector('.shop-tabs');
+        if (tabs) tabs.style.display = 'flex';
+    }
+
+    selectArmoryWeapon(weaponId) {
+        this.selectedArmoryWeapon = weaponId;
+        this.renderArmoryCustomizer(this.lastShopData);
+    }
+
+    renderArmoryCustomizer(data) {
+        const panel = document.getElementById('armory-customizer');
+        const tabs = document.getElementById('armory-weapon-tabs');
+        const cards = document.getElementById('armory-mod-cards');
+        const summary = document.getElementById('armory-upgrade-summary');
+        const image = document.getElementById('armory-weapon-image');
+        const unlock = document.getElementById('armory-unlock-card');
+        if (!panel || !tabs || !cards || !summary || !image || !unlock || !data?.weapons) return;
+        if (!this.activeShopContext?.hub || this.activeShopContext.researchStation !== 'armory') return;
+
+        const weaponOptions = [
+            { id: 'pistol', name: 'PISZTOLY', image: data.weapons.pistol.image, basePrice: 200 },
+            { id: 'shotgun', name: 'SÖRÉTES', image: data.weapons.shotgun.image, basePrice: 500 },
+            { id: 'rifle', name: 'GÉPKARABÉLY', image: data.weapons.rifle.image, basePrice: 1000 },
+            { id: 'super', name: 'REVOLVER', image: data.weapons.super.image, basePrice: 5000 }
+        ];
+        if (!data.weapons[this.selectedArmoryWeapon]) this.selectedArmoryWeapon = 'pistol';
+
+        tabs.replaceChildren();
+        for (const entry of weaponOptions) {
+            const weapon = data.weapons[entry.id];
+            const tab = document.createElement('button');
+            tab.type = 'button';
+            tab.className = `armory-weapon-tab${entry.id === this.selectedArmoryWeapon ? ' active' : ''}`;
+            tab.setAttribute('aria-pressed', String(entry.id === this.selectedArmoryWeapon));
+            tab.textContent = `${entry.name} · ${weapon.owned ? `LVL ${weapon.level}` : 'ZÁROLT'}`;
+            tab.addEventListener('click', () => this.selectArmoryWeapon(entry.id));
+            tabs.appendChild(tab);
+        }
+
+        const selected = weaponOptions.find(entry => entry.id === this.selectedArmoryWeapon);
+        const weapon = data.weapons[selected.id];
+        image.src = selected.image;
+        image.alt = selected.name;
+        image.classList.toggle('hidden', !selected.image);
+        unlock.classList.toggle('hidden', weapon.owned);
+        unlock.textContent = `ENGEDÉLYEZÉS // ${selected.basePrice} CR`;
+        unlock.disabled = data.score < selected.basePrice;
+        unlock.onclick = () => EventBus.emit('TRY_BUY_WEAPON', {
+            id: selected.id,
+            price: selected.basePrice
+        });
+
+        const upgradeCards = [
+            { title: 'TARTALÉK TÁR', level: 2, detail: '+50% tartalék lőszer' },
+            { title: 'GYORS ÚJRATÖLTÉS', level: 3, detail: '-25% újratöltési idő' },
+            {
+                title: selected.id === 'super' ? 'MAGNUM KALIBER' : 'NAGYOBB TÁR',
+                level: 4,
+                detail: selected.id === 'super' ? '+50% sebzés' : '+50% tárkapacitás'
+            },
+            { title: 'PÁNCÉLTÖRŐ LŐSZER', level: 5, detail: '+100% sebzés' }
+        ];
+        cards.replaceChildren();
+        const leftCards = document.createElement('div');
+        leftCards.className = 'armory-mod-side armory-mod-left';
+        const rightCards = document.createElement('div');
+        rightCards.className = 'armory-mod-side armory-mod-right';
+        upgradeCards.forEach((upgrade, index) => {
+            const card = document.createElement('button');
+            card.type = 'button';
+            const status = !weapon.owned
+                ? 'FEGYVER ZÁROLVA'
+                : weapon.level >= upgrade.level
+                    ? 'BEÉPÍTVE'
+                    : weapon.level === upgrade.level - 1
+                        ? 'KÖVETKEZŐ KALIBRÁCIÓ'
+                        : `LVL ${upgrade.level} KÖVETELMÉNY`;
+            card.className = `armory-mod-card${status === 'BEÉPÍTVE' ? ' installed' : status === 'KÖVETKEZŐ KALIBRÁCIÓ' ? ' next' : ''}`;
+            card.innerHTML = `<span class="armory-mod-index">MODUL 0${index + 1} // LVL ${upgrade.level}</span>
+                <strong>${upgrade.title}</strong>
+                <span>${upgrade.detail}</span>
+                <em>${status}</em>`;
+            const isNext = weapon.owned && weapon.level === upgrade.level - 1;
+            const price = selected.basePrice * weapon.level;
+            if (isNext) {
+                card.innerHTML += `<span class="armory-mod-price">${price} CR // KALIBRÁLÁS</span>`;
+                card.classList.add('next');
+                card.disabled = data.score < price;
+                card.addEventListener('click', () => EventBus.emit('TRY_BUY_WEAPON', {
+                    id: selected.id,
+                    price
+                }));
+            } else {
+                card.disabled = true;
+            }
+            (index < 2 ? leftCards : rightCards).appendChild(card);
+        });
+        cards.append(leftCards, rightCards);
+
+        summary.textContent = weapon.owned
+            ? `${selected.name} // LVL ${weapon.level} / 5 // ${weapon.ammo} TÁR / ${weapon.reserve} TARTALÉK`
+            : `${selected.name} // ENGEDÉLYEZÉS SZÜKSÉGES`;
     }
 
     renderCommsPanel(panel, data, theme) {
@@ -1656,7 +1820,7 @@ class UIManager {
             { id: 'pistol', name: 'OMNICORP PISZTOLY', basePrice: 200, image: data.weapons.pistol.image },
             { id: 'shotgun', name: 'SÖRÉTES PUSKA', basePrice: 500, image: data.weapons.shotgun.image },
             { id: 'rifle', name: 'GÉPKARABÉLY', basePrice: 1000, image: data.weapons.rifle.image },
-            { id: 'super', name: 'NEHÉZ REVOLVER', basePrice: 5000, image: data.weapons.super.image }
+            { id: 'super', name: 'REVOLVER', basePrice: 5000, image: data.weapons.super.image }
         ];
 
         weaponsList.forEach(wData => {
@@ -1683,8 +1847,15 @@ class UIManager {
                 btn.innerHTML = this.getBtnHTML(wData.name, wData.image, "ÁLLAPOT: MAX SZINT (LVL 5)", "---");
                 btn.disabled = true;
             }
-            btn.onclick = () => EventBus.emit('TRY_BUY_WEAPON', { id: wData.id, price: wp.owned ? wData.basePrice * wp.level : wData.basePrice });
+            btn.onclick = () => {
+                if (this.activeShopContext?.hub && this.activeShopContext.researchStation === 'armory') {
+                    this.selectArmoryWeapon(wData.id);
+                    return;
+                }
+                EventBus.emit('TRY_BUY_WEAPON', { id: wData.id, price: wp.owned ? wData.basePrice * wp.level : wData.basePrice });
+            };
         });
+        this.renderArmoryCustomizer(data);
 
         // Skill gombok generálása
         const skillsList = [
@@ -1728,19 +1899,27 @@ class UIManager {
 
         // Gyorsműveletek (Eseményt küldünk)
         const ammoBtn = document.getElementById('buy-ammo');
+        const ammoPanel = document.getElementById('ammo-purchase-panel');
         if (ammoBtn) {
             ammoBtn.classList.add('btn-action');
-            let needsAmmo = data.needsAmmo;
+            const needsAmmo = Object.entries(data.weapons).some(([id, weapon]) =>
+                id !== 'melee' && weapon.owned && weapon.reserve < weapon.maxReserve
+            );
             if (!needsAmmo) {
-                ammoBtn.innerHTML = this.getBtnHTML("LŐSZER UTÁNPÓTLÁS", "", "A tartalék kapacitás maximális.", "KÖLTSÉG: 0 CR");
+                ammoBtn.innerHTML = this.getBtnHTML("LŐSZER UTÁNPÓTLÁS", "", "Minden fegyver tartaléka maximális.", "NINCS TEENDŐ");
                 ammoBtn.disabled = true;
             } else {
-                let pColor = data.score >= 50 ? "#00ff00" : "#ff5555";
-                ammoBtn.innerHTML = this.getBtnHTML("LŐSZER UTÁNPÓTLÁS", "", "+25% Tartalék minden fegyverbe", `<span style="color:${pColor};">KÖLTSÉG: 50 CR</span>`);
+                ammoBtn.innerHTML = this.getBtnHTML("LŐSZER UTÁNPÓTLÁS", "", "Válassz fegyvert és utántöltési szintet.", "25% · 50% · 75% · 100%");
                 ammoBtn.disabled = false;
             }
-            ammoBtn.onclick = () => EventBus.emit('TRY_BUY_AMMO', { price: 50 });
+            ammoBtn.onclick = () => {
+                if (ammoPanel) ammoPanel.classList.toggle('hidden');
+                if (ammoPanel && !ammoPanel.classList.contains('hidden')) {
+                    this.renderAmmoPurchaseOptions(data);
+                }
+            };
         }
+        this.renderAmmoPurchaseOptions(data);
 
         const medkitBtn = document.getElementById('buy-medkit');
         if (medkitBtn) {
@@ -1863,6 +2042,55 @@ class UIManager {
         }
     }
 
+    renderAmmoPurchaseOptions(data) {
+        const panel = document.getElementById('ammo-purchase-panel');
+        const weaponCards = document.getElementById('ammo-weapon-cards');
+        const refillCards = document.getElementById('ammo-refill-cards');
+        if (!panel || !weaponCards || !refillCards) return;
+        const availableWeapons = Object.entries(ammoPrices)
+            .filter(([id]) => {
+                const weapon = data.weapons[id];
+                return weapon && weapon.owned && weapon.reserve < weapon.maxReserve;
+            });
+        if (!availableWeapons.some(([id]) => id === this.selectedAmmoWeapon)) {
+            this.selectedAmmoWeapon = availableWeapons[0]?.[0] || null;
+        }
+        weaponCards.replaceChildren(...availableWeapons.map(([id, price]) => {
+            const weapon = data.weapons[id];
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = `ammo-choice-card${id === this.selectedAmmoWeapon ? ' selected' : ''}`;
+            card.setAttribute('aria-pressed', String(id === this.selectedAmmoWeapon));
+            card.innerHTML = `<strong>${weapon.name}</strong><span>${weapon.reserve} / ${weapon.maxReserve} tartalék</span><em>${price} CR / lőszer</em>`;
+            card.addEventListener('click', () => {
+                this.selectedAmmoWeapon = id;
+                this.renderAmmoPurchaseOptions(this.lastShopData || data);
+            });
+            return card;
+        }));
+        if (!availableWeapons.length) {
+            panel.classList.add('hidden');
+            refillCards.replaceChildren();
+            return;
+        }
+
+        const weapon = data.weapons[this.selectedAmmoWeapon];
+        const missing = weapon.maxReserve - weapon.reserve;
+        refillCards.replaceChildren(...[25, 50, 75, 100].map(percent => {
+            const amount = Math.min(missing, Math.max(1, Math.ceil(missing * percent / 100)));
+            const cost = amount * ammoPrices[this.selectedAmmoWeapon];
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'ammo-choice-card ammo-refill-card';
+            card.disabled = data.score < cost;
+            card.innerHTML = `<strong>${percent}%</strong><span>+${amount} lőszer</span><em>${cost} CR</em>`;
+            card.addEventListener('click', () => EventBus.emit('TRY_BUY_AMMO', {
+                weaponId: this.selectedAmmoWeapon,
+                amount
+            }));
+            return card;
+        }));
+    }
 
     // ==========================================
     // ARCHÍVUM / KÓDEX (LORE) LOGIKA

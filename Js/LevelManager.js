@@ -52,8 +52,10 @@ class LevelManager {
         this.regenerationPod = null;
         this.terminalModelMixer = null;
         this.terminalModelAction = null;
-        this.terminalModelTime = 2.7;
-        this.terminalModelTargetTime = 2.7;
+        this.terminalClosedTime = 2.7;
+        this.terminalModelTime = this.terminalClosedTime;
+        this.terminalModelTargetTime = this.terminalClosedTime;
+        this.researchTerminalAnimations = [];
         this.podPowerLight = null;
         this.podRotor = null;
         this.podAnimationTime = 0;
@@ -76,6 +78,8 @@ class LevelManager {
         EventBus.on('TERMINAL_RESET', () => this.setTerminalActive(false));
         EventBus.on('TERMINAL_OPEN', () => this.setTerminalModelOpen(true));
         EventBus.on('TERMINAL_CLOSE', () => this.setTerminalModelOpen(false));
+        EventBus.on('RESEARCH_TERMINAL_OPEN', (data) => this.setResearchTerminalOpen(data.station, true));
+        EventBus.on('RESEARCH_TERMINAL_CLOSE', (data) => this.setResearchTerminalOpen(data.station, false));
         EventBus.on('STERILIZATION_STEAM', (intensity) => this.setSterilizationSteam(intensity));
         EventBus.on('WAVE_STARTED', (data) => this.setCampaignFloor(data.wave));
         EventBus.on('CAMPAIGN_FLOOR_RESET', () => this.setCampaignFloor(1));
@@ -767,7 +771,7 @@ class LevelManager {
             this.terminalModelAction = this.terminalModelMixer.clipAction(terminalModel.animations[0]);
             this.terminalModelAction.play();
             this.terminalModelAction.paused = true;
-            this.terminalModelAction.time = this.terminalModelTime;
+            this.terminalModelAction.time = this.terminalClosedTime;
             this.terminalModelMixer.update(0);
         } else {
             console.warn('[KRONOS] The terminal model has no animation clips.');
@@ -939,6 +943,7 @@ class LevelManager {
         this.researchHubGroup = group;
         this.researchHubCollisions = [];
         this.researchRoomLights = [];
+        this.researchTerminalAnimations = [];
         this.scene.add(group);
 
         const rotations = { armory: 0, regeneration: Math.PI, comms: Math.PI / 2, augmentation: -Math.PI / 2 };
@@ -977,6 +982,29 @@ class LevelManager {
                 consoleBase.visible = false;
                 const model = terminalModel.mesh;
                 room.add(model);
+                const mixer = terminalModel.animations.length
+                    ? new THREE.AnimationMixer(model)
+                    : null;
+                const action = mixer
+                    ? mixer.clipAction(terminalModel.animations[0])
+                    : null;
+                if (action) {
+                    action.setLoop(THREE.LoopOnce, 1);
+                    action.clampWhenFinished = true;
+                    action.play();
+                    action.paused = true;
+                    action.time = this.terminalClosedTime;
+                    mixer.update(0);
+                } else {
+                    console.warn(`[KRONOS] Research terminal "${station.id}" has no animation clips.`);
+                }
+                this.researchTerminalAnimations.push({
+                    station: station.id,
+                    mixer,
+                    action,
+                    time: this.terminalClosedTime,
+                    targetTime: this.terminalClosedTime
+                });
                 model.updateMatrixWorld(true);
                 const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
                 const scale = 2.4 / Math.max(size.y, 0.001);
@@ -1076,7 +1104,20 @@ class LevelManager {
     }
 
     setTerminalModelOpen(isOpen) {
-        this.terminalModelTargetTime = isOpen ? 0 : 2.7;
+        this.terminalModelTargetTime = isOpen ? 0 : this.terminalClosedTime;
+    }
+
+    setResearchTerminalOpen(station, isOpen) {
+        const terminal = this.researchTerminalAnimations.find(entry => entry.station === station);
+        if (!terminal || !terminal.action) {
+            EventBus.emit('RESEARCH_TERMINAL_ANIMATION_COMPLETE', { station, isOpen });
+            return;
+        }
+
+        terminal.targetTime = isOpen ? 0 : this.terminalClosedTime;
+        if (terminal.time === terminal.targetTime) {
+            EventBus.emit('RESEARCH_TERMINAL_ANIMATION_COMPLETE', { station, isOpen });
+        }
     }
 
     setPodDoorOpen(isOpen) {
@@ -1288,6 +1329,20 @@ class LevelManager {
     }
 
     update(delta) {
+        for (const terminal of this.researchTerminalAnimations) {
+            if (terminal.time === terminal.targetTime) continue;
+            const direction = Math.sign(terminal.targetTime - terminal.time);
+            terminal.time += direction * Math.min(delta, Math.abs(terminal.targetTime - terminal.time));
+            terminal.action.time = terminal.time;
+            terminal.mixer.update(0);
+            if (terminal.time === terminal.targetTime) {
+                EventBus.emit('RESEARCH_TERMINAL_ANIMATION_COMPLETE', {
+                    station: terminal.station,
+                    isOpen: terminal.targetTime === 0
+                });
+            }
+        }
+
         if (this.terminalModelAction && this.terminalModelMixer) {
             const timeRemaining = this.terminalModelTargetTime - this.terminalModelTime;
             if (Math.abs(timeRemaining) > 0.001) {

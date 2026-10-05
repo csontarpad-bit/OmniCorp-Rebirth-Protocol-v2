@@ -3,12 +3,14 @@ import { playerStats } from './RuntimeState.js';
 export { playerStats, loadPlayerStats, savePlayerStats, getResearchLevel, getDamageBoost } from './RuntimeState.js';
 export { generateEnemyStatHTML } from './UITemplates.js';
 
+export const ammoPrices = Object.freeze({ pistol: 1, rifle: 2, shotgun: 3, super: 10 });
+
 export const weapons = {
     melee: { name: 'Taktikai Kés', level: 1, damage: 0.5, ammo: Infinity, reserve: Infinity, maxAmmo: Infinity, maxReserve: Infinity, pellets: 1, spread: 0, reloadTime: 0, owned: true, auto: false, fireRate: 0, image: "" },
     pistol: { name: 'Pisztoly', level: 1, damage: 1, ammo: 10, reserve: 30, maxAmmo: 10, maxReserve: 30, pellets: 1, spread: 0, reloadTime: 1500, owned: true, auto: false, fireRate: 0, image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/45abc3b3555b01cf93886d8560800ff7f3c5871c/pisztoly.png" },
     shotgun: { name: 'Sörétes', level: 1, damage: 1.2, ammo: 0, reserve: 0, maxAmmo: 6, maxReserve: 24, pellets: 6, spread: 0.15, reloadTime: 2000, owned: false, auto: false, fireRate: 0, image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/45abc3b3555b01cf93886d8560800ff7f3c5871c/sz%C3%B6r%C3%A9tes.png" },
     rifle: { name: 'Gépkarabély', level: 1, damage: 0.8, ammo: 0, reserve: 0, maxAmmo: 30, maxReserve: 90, pellets: 1, spread: 0.05, reloadTime: 1800, owned: false, auto: true, fireRate: 0.08, image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/df39681a8668bd04e80660051e5755ff31995ba7/g%C3%A9gkarab%C3%A9ly.png" },
-    super: { name: 'Szuper fegyver', level: 1, damage: 15, ammo: 0, reserve: 0, maxAmmo: 6, maxReserve: 18, pellets: 1, spread: 0, reloadTime: 2500, owned: false, auto: false, fireRate: 0, image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/df39681a8668bd04e80660051e5755ff31995ba7/revolver.png" }
+    super: { name: 'Revolver', level: 1, damage: 15, ammo: 0, reserve: 0, maxAmmo: 6, maxReserve: 18, pellets: 1, spread: 0, reloadTime: 2500, owned: false, auto: false, fireRate: 0, image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/df39681a8668bd04e80660051e5755ff31995ba7/revolver.png" }
 };
 
 export const skills = {
@@ -281,7 +283,7 @@ enemies: [
             checkUnlock: () => (typeof currentWave !== 'undefined' && currentWave >= 6) || playerStats.wavesSurvived >= 6,
             statInfo: 'shield_red',
             image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/25d9afc7ab2489c689298e9c7aee89b8c8d45fee/v%C3%B6r%C3%B6s%20pocsolya.jpeg",
-            text: "KRONOS ELEMZÉS: A sejtburjánzás elérte a kritikus tömeget. A gél megszilárdulása a mutánsokon szinte áttörhetetlen, 80%-os védelmet biztosít. A pocsolyában lévő sejtek replikációs fázisba lépnek, mutáció kialakulása várható.\n\nGALLAGHER MEGJEGYZÉSE: \"Az Omega szektor felé közeledve a gomba teljesen bevadul. A vörös pocsolyák 80%-os páncélt adnak a dögöknek. Sörétes vagy a Nehéz Revolver nélkül esélyed sincs átlőni rajta! De ami még rosszabb: a gélben lévő szerves maradványok elkezdenek lüktetni. Ha meglátod, hogy a vörös massza pulzál, tudd, hogy valami ki akar kelni belőle!\""
+            text: "KRONOS ELEMZÉS: A sejtburjánzás elérte a kritikus tömeget. A gél megszilárdulása a mutánsokon szinte áttörhetetlen, 80%-os védelmet biztosít. A pocsolyában lévő sejtek replikációs fázisba lépnek, mutáció kialakulása várható.\n\nGALLAGHER MEGJEGYZÉSE: \"Az Omega szektor felé közeledve a gomba teljesen bevadul. A vörös pocsolyák 80%-os páncélt adnak a dögöknek. Sörétes vagy Revolver nélkül esélyed sincs átlőni rajta! De ami még rosszabb: a gélben lévő szerves maradványok elkezdenek lüktetni. Ha meglátod, hogy a vörös massza pulzál, tudd, hogy valami ki akar kelni belőle!\""
         },
         {
             id: "plant",
@@ -323,7 +325,7 @@ enemies: [
         },
 {
             id: "weapon_super",
-            title: "NEHÉZ REVOLVER",
+            title: "REVOLVER",
             requirementText: "FELOLDÁS: Vásárolja meg a Terminálon.",
             checkUnlock: () => playerStats.weaponsBought.super,
             statInfo: 'weapon_super',
@@ -447,7 +449,7 @@ export const OmniCorpDirectives = {
         { id: "t3_dmg_boss", title: "KRONOS: Glitch-Trauma", desc: "<span style='color:#00ffff;'>KRONOS:</span> Neuro-sokk (Ordítás) elszenvedése a Nexus-Node-tól.<br><span style='color:#ffaa00;'>GALLAGHER:</span> A gép azt akarja, hogy telibe kapd az ordítását. Készülj fel, vakon fogsz harcolni a lökés után!", type: "take_damage", target: "boss", goal: 1, reward: 2500 },
         { id: "t3_stand_red", title: "KRONOS: Vörös Toxicitás", desc: "<span style='color:#00ffff;'>KRONOS:</span> Kritikus fázisú vörös biomassza sav-tesztje.<br><span style='color:#ffaa00;'>GALLAGHER:</span> Ne... 3 másodperc a vörös hólyagokon. Ez leégeti a húst a csontodról. Csak ha nagyon kell a Kredit!", type: "puddle_stand", target: "ready", goal: 3, reward: 2000 },
         
-        { id: "t3_pkill_r_boss", title: "KRONOS: Góliát Pajzs-teszt", desc: "<span style='color:#00ffff;'>KRONOS:</span> Nexus-Node kiiktatása Vörös zónában.<br><span style='color:#ffaa00;'>GALLAGHER:</span> Őrület. Egy 80%-os pajzzsal rendelkező Bosst kell megölnöd a vörös tócsán. Nehéz Revolver nélkül esélyed sincs.", type: "puddle_kill", target: "ready", goal: 1, reward: 3000 },
+        { id: "t3_pkill_r_boss", title: "KRONOS: Góliát Pajzs-teszt", desc: "<span style='color:#00ffff;'>KRONOS:</span> Nexus-Node kiiktatása Vörös zónában.<br><span style='color:#ffaa00;'>GALLAGHER:</span> Őrület. Egy 80%-os pajzzsal rendelkező Bosst kell megölnöd a vörös tócsán. Revolver nélkül esélyed sincs.", type: "puddle_kill", target: "ready", goal: 1, reward: 3000 },
         
         { id: "t3_alpha", title: "OMEGA-DIREKTÍVA: REBIRTH", desc: "<span style='color:#00ffff;'>KRONOS:</span> OMEGA-PIROS FELÜLBÍRÁLAT. CÉLPONT: A MAG.<br><span style='color:#ffaa00;'>GALLAGHER:</span> ...ECHO... Juss el a 100. Szintig. Én lenn leszek a laborban. Végezd be...", type: "kill_body", target: "alpha", goal: 1, reward: 50000 }
     ]

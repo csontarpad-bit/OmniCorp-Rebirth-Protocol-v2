@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
-import { weapons, skills, OmniCorpDirectives } from './Database.js';
+import { ammoPrices, weapons, skills, OmniCorpDirectives } from './Database.js';
 import { playerStats, savePlayerStats } from './RuntimeState.js';
 import { getCampaignFloorInfo, getResearchHubStationAt, researchCommsLog } from './Campaign.js';
 
@@ -88,6 +88,7 @@ export class GameManager {
         EventBus.on('ZOMBIE_KILLED', (data) => this.onZombieKilled(data));
         EventBus.on('PLAYER_DIED', () => this.onPlayerDied());
         EventBus.on('input:interact', () => this.tryActivateTerminal());
+        EventBus.on('RESEARCH_TERMINAL_ANIMATION_COMPLETE', (data) => this.onResearchTerminalAnimationComplete(data));
 
         // Direktíva Események
         EventBus.on('ACCEPT_DIRECTIVE', (id) => this.onAcceptDirective(id));
@@ -114,11 +115,9 @@ export class GameManager {
         EventBus.on('CLEAR_SHOP_LOCK', () => { this.shopLockedForNextWave = false; });
         EventBus.on('CLOSE_SHOP', () => {
             if (this.gameState === 'SHOPPING' && this.terminalSequence === 'hub-menu') {
-                this.terminalSequence = 'idle';
-                this.gameState = 'PLAYING';
-                this.isResearchHubActive = false;
-                this.activeResearchStation = null;
-                this.updateResearchHubProximity();
+                this.gameState = 'TERMINAL_TRANSITION';
+                this.terminalSequence = 'hub-closing';
+                EventBus.emit('RESEARCH_TERMINAL_CLOSE', { station: this.activeResearchStation });
                 return;
             }
             if (this.gameState !== 'SHOPPING' || !this.terminalReady || this.terminalSequence !== 'menu') return;
@@ -657,21 +656,41 @@ export class GameManager {
 
         this.activeResearchStation = station.id;
         this.isResearchHubActive = true;
-        this.gameState = 'SHOPPING';
-        this.terminalSequence = 'hub-menu';
+        this.gameState = 'TERMINAL_TRANSITION';
+        this.terminalSequence = 'hub-opening';
+        EventBus.emit('RESEARCH_TERMINAL_OPEN', { station: station.id });
+        return true;
+    }
+
+    onResearchTerminalAnimationComplete({ station, isOpen }) {
+        if (station !== this.activeResearchStation) return;
+        if (isOpen && this.terminalSequence === 'hub-opening') {
+            this.gameState = 'SHOPPING';
+            this.terminalSequence = 'hub-menu';
+            this.openResearchHubShop(station);
+        } else if (!isOpen && this.terminalSequence === 'hub-closing') {
+            this.terminalSequence = 'idle';
+            this.gameState = 'PLAYING';
+            this.isResearchHubActive = false;
+            this.activeResearchStation = null;
+            EventBus.emit('RESEARCH_TERMINAL_SESSION_CLOSED');
+            this.updateResearchHubProximity();
+        }
+    }
+
+    openResearchHubShop(station) {
         EventBus.emit('OPEN_SHOP', {
             terminal: true,
             hub: true,
             researchFloor: this.activeResearchFloor,
             sector: getCampaignFloorInfo(this.activeResearchFloor).sector.name,
-            researchStation: station.id,
-            researchTab: station.id === 'augmentation' ? 'skills' : 'weapons',
-            commsLog: station.id === 'comms'
+            researchStation: station,
+            researchTab: station === 'augmentation' ? 'skills' : 'weapons',
+            commsLog: station === 'comms'
                 ? Object.keys(researchCommsLog).map(Number).filter(floor => floor <= this.activeResearchFloor)
                     .map(floor => ({ floor, ...researchCommsLog[floor] }))
                 : null
         });
-        return true;
     }
 
     beginTerminalExit() {
@@ -1042,31 +1061,22 @@ export class GameManager {
     }
 
     onTryBuyAmmo(data) {
-        let price = data.price || 50;
-        let needsAmmo = false;
-        for (let key in weapons) {
-            if (weapons[key].owned && weapons[key].reserve < weapons[key].maxReserve) {
-                needsAmmo = true;
-                break;
-            }
-        }
-
-        if (this.score < price || !needsAmmo) {
+        const weapon = data && weapons[data.weaponId];
+        const amount = data && data.amount;
+        const price = ammoPrices[data && data.weaponId];
+        const isLiftTerminal = this.gameState === 'SHOPPING' && this.terminalSequence === 'menu';
+        if (!isLiftTerminal || !weapon || !weapon.owned || !Number.isInteger(amount) ||
+            amount <= 0 || !Number.isFinite(price) || weapon.reserve >= weapon.maxReserve ||
+            amount > weapon.maxReserve - weapon.reserve || this.score < amount * price) {
             EventBus.emit('PURCHASE_FAILED');
             return;
         }
 
-        this.score -= price;
-        for (let key in weapons) {
-            if (weapons[key].owned) {
-                let ammoToAdd = Math.floor(weapons[key].maxReserve * 0.25);
-                weapons[key].reserve = Math.min(weapons[key].maxReserve, weapons[key].reserve + ammoToAdd);
-            }
-        }
+        this.score -= amount * price;
+        weapon.reserve += amount;
 
-        let currentW = this.weaponSystem ? weapons[this.weaponSystem.currentWeaponId] : null;
-        if (currentW) {
-            EventBus.emit('AMMO_CHANGED', { current: currentW.ammo, max: currentW.reserve });
+        if (this.weaponSystem && this.weaponSystem.currentWeaponId === data.weaponId) {
+            EventBus.emit('AMMO_CHANGED', { current: weapon.ammo, max: weapon.reserve });
         }
 
         EventBus.emit('PLAY_SOUND', { id: 'purchase' });
