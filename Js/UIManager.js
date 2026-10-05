@@ -14,6 +14,8 @@ class UIManager {
         this.weaponsDataCache = null;
         this.skillsDataCache = null;
         this.isModelsLoaded = false;
+        this.waveBriefingInterval = null;
+        this.waveBriefingTimeout = null;
 
         // Globális függvények az inline onclick eseményekhez
         this.loreAudio = null;
@@ -67,40 +69,38 @@ class UIManager {
         EventBus.on('SHOW_LOOT_POPUP', (data) => this.showLootPopup(data));
         EventBus.on('SHOW_INTERACT_PROMPT', (data) => this.showInteractPrompt(data));
         EventBus.on('OPEN_SHOP', (data) => this.openShop(data || {}));
+        EventBus.on('STERILIZATION_CONFIRMATION_REQUEST', (data) => this.showSterilizationConfirmation(data));
+        EventBus.on('STERILIZATION_STARTED', () => {
+            if (this.shopMenu) this.shopMenu.classList.add('hidden');
+        });
+        EventBus.on('STERILIZATION_COMPLETED', () => {
+            this.openShop({ terminal: true, silent: true });
+        });
+        EventBus.on('HEALING_CONFIRMATION_REQUEST', (data) => this.showHealingConfirmation(data));
+        EventBus.on('HEALING_STARTED', () => {
+            if (this.shopMenu) this.shopMenu.classList.add('hidden');
+        });
+        EventBus.on('HEALING_COMPLETED', () => {
+            this.openShop({ terminal: true, silent: true });
+        });
         EventBus.on('SHOP_DATA_READY', (data) => {
             this.lastShopData = data;
             this.updateShopButtons(data);
         });
         EventBus.on('WAVE_STARTING', (data) => {
-            const waveDisplay = document.getElementById('wave-display');
-            if (waveDisplay) {
-                waveDisplay.classList.remove('normal-wave');
-                waveDisplay.innerText = `⬇️ IPARI FELVONÓ: SÜLLYEDÉS A(Z) ${data.wave}. SZINTRE... ⬇️`;
-                waveDisplay.classList.remove('hidden');
-            }
+            this.showWaveBriefing(`FELVONÓ: SÜLLYEDÉS A ${data.wave}. SZINTRE`);
         });
         EventBus.on('ELEVATOR_ARRIVED', (data) => {
-            const waveDisplay = document.getElementById('wave-display');
-            if (waveDisplay) {
-                waveDisplay.innerText = `⚠️ MEGÉRKEZÉS: ${data.wave}. SZINT ⚠️`;
-            }
+            this.showWaveBriefing(`${data.wave}. SZINT ELÉRVE`);
         });
-        EventBus.on('GATES_OPENING', (data) => {
-            const waveDisplay = document.getElementById('wave-display');
-            if (waveDisplay) {
-                waveDisplay.innerText = `⚠️ ZSILIPKAPUK NYITÁSA... ⚠️`;
-            }
+        EventBus.on('GATES_OPENING', () => {
+            this.showWaveBriefing('ZSILIPKAPUK NYÍLNAK');
         });
         EventBus.on('WAVE_STARTED', (data) => {
-            const waveDisplay = document.getElementById('wave-display');
-            if (waveDisplay) {
-                waveDisplay.innerText = `${data.wave}. SZINT`;
-                waveDisplay.classList.add('normal-wave');
-                setTimeout(() => {
-                    waveDisplay.classList.add('hidden');
-                    waveDisplay.classList.remove('normal-wave');
-                }, 2500);
-            }
+            this.showWaveBriefing(`${data.wave}. SZINT — FENYEGETÉS AKTÍV`, 1800);
+        });
+        EventBus.on('TERMINAL_AVAILABLE', (data) => {
+            this.showWaveBriefing(`${data.wave}. HULLÁM LEZÁRVA — TERMINÁL ELÉRHETŐ [E]`, 3600);
         });
         EventBus.on('GAME_OVER', (data) => {
             const fsEl = document.getElementById('final-score');
@@ -219,6 +219,53 @@ class UIManager {
     unbindEvents() {
         EventBus.removeListenersForOwner(this);
         this._eventsBound = false;
+    }
+
+    showWaveBriefing(message, visibleDuration = 1800) {
+        const display = document.getElementById('wave-display');
+        if (!display) return;
+
+        if (this.waveBriefingInterval) clearInterval(this.waveBriefingInterval);
+        if (this.waveBriefingTimeout) clearTimeout(this.waveBriefingTimeout);
+
+        display.classList.remove('normal-wave', 'hidden');
+        display.classList.add('wave-briefing');
+        display.textContent = '';
+        let index = 0;
+        this.waveBriefingInterval = setInterval(() => {
+            display.textContent += message[index++];
+            if (index >= message.length) {
+                clearInterval(this.waveBriefingInterval);
+                this.waveBriefingInterval = null;
+                this.waveBriefingTimeout = setTimeout(() => {
+                    display.classList.add('hidden');
+                    display.classList.remove('wave-briefing');
+                    this.waveBriefingTimeout = null;
+                }, visibleDuration);
+            }
+        }, 24);
+    }
+
+    showSterilizationConfirmation(data) {
+        const overlay = document.getElementById('sterilization-confirm-overlay');
+        const puddles = document.getElementById('sterilization-confirm-count');
+        const total = document.getElementById('sterilization-confirm-cost');
+        if (!overlay || !puddles || !total || !data) return;
+
+        puddles.textContent = String(data.puddleCount);
+        total.textContent = `${data.cost} CR`;
+        overlay.classList.remove('hidden');
+    }
+
+    showHealingConfirmation(data) {
+        const overlay = document.getElementById('healing-confirm-overlay');
+        const amount = document.getElementById('healing-confirm-amount');
+        const total = document.getElementById('healing-confirm-cost');
+        if (!overlay || !amount || !total || !data) return;
+
+        amount.textContent = `+${data.missingHP} HP`;
+        total.textContent = `${data.cost} CR`;
+        overlay.classList.remove('hidden');
     }
 
 
@@ -1097,6 +1144,32 @@ class UIManager {
     // BOLT ÉS FEJLESZTÉSEK
     // ==========================================
     _setupShopMenu() {
+        const cleanConfirmOverlay = document.getElementById('sterilization-confirm-overlay');
+        const cancelCleanButton = document.getElementById('cancel-sterilization');
+        const confirmCleanButton = document.getElementById('confirm-sterilization');
+        if (cancelCleanButton && cleanConfirmOverlay) {
+            cancelCleanButton.addEventListener('click', () => cleanConfirmOverlay.classList.add('hidden'));
+        }
+        if (confirmCleanButton && cleanConfirmOverlay) {
+            confirmCleanButton.addEventListener('click', () => {
+                cleanConfirmOverlay.classList.add('hidden');
+                EventBus.emit('TRY_BUY_CLEAN', { confirmed: true });
+            });
+        }
+
+        const healConfirmOverlay = document.getElementById('healing-confirm-overlay');
+        const cancelHealButton = document.getElementById('cancel-healing');
+        const confirmHealButton = document.getElementById('confirm-healing');
+        if (cancelHealButton && healConfirmOverlay) {
+            cancelHealButton.addEventListener('click', () => healConfirmOverlay.classList.add('hidden'));
+        }
+        if (confirmHealButton && healConfirmOverlay) {
+            confirmHealButton.addEventListener('click', () => {
+                healConfirmOverlay.classList.add('hidden');
+                EventBus.emit('TRY_BUY_HEAL', { confirmed: true });
+            });
+        }
+
         const tabWeaponsBtn = document.getElementById('tab-weapons');
         const tabSkillsBtn = document.getElementById('tab-skills');
         const tabDirectivesBtn = document.getElementById('tab-directives');
@@ -1147,7 +1220,7 @@ class UIManager {
 
     openShop(data) {
         try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) { }
-        EventBus.emit('PLAY_SOUND', 'termOpen');
+        if (!data.silent) EventBus.emit('PLAY_SOUND', 'termOpen');
         if (this.shopMenu) this.shopMenu.classList.remove('hidden');
         document.getElementById('game-ui-wrapper').classList.add('hidden');
         const closeShopButton = document.getElementById('close-shop-btn');
@@ -1441,11 +1514,10 @@ class UIManager {
                 healBtn.innerHTML = this.getBtnHTML(`BIOLÓGIAI HELYREÁLLÍTÁS (+${Math.floor(missingHP)} HP)`, "", "Azonnali, teljes sejtszintű regeneráció.", `KÖLTSÉG: ${healCost} CR`);
                 healBtn.disabled = (data.score < healCost);
             }
-            healBtn.onclick = () => {
-                EventBus.emit('TRY_BUY_HEAL', { price: healCost, missingHP });
-                const healFlash = document.getElementById('heal-flash');
-                if (healFlash && missingHP > 0 && data.score >= healCost) { healFlash.style.opacity = 1; setTimeout(() => healFlash.style.opacity = 0, 300); }
-            };
+            healBtn.onclick = () => EventBus.emit('HEALING_CONFIRMATION_REQUEST', {
+                missingHP: Math.ceil(missingHP),
+                cost: healCost
+            });
         }
 
         const armorBtn = document.getElementById('buy-armor');
@@ -1465,23 +1537,27 @@ class UIManager {
             armorBtn.onclick = () => EventBus.emit('TRY_BUY_ARMOR', { price: armorCost });
         }
 
+        const puddleCount = data.sterilizationPuddleCount ?? data.toxicPuddlesCount;
         const puddleCountDisplay = document.getElementById('puddle-count');
-        if (puddleCountDisplay) puddleCountDisplay.innerText = data.toxicPuddlesCount;
+        if (puddleCountDisplay) puddleCountDisplay.innerText = puddleCount;
 
         const cleanBtn = document.getElementById('buy-clean');
         if (cleanBtn) {
             cleanBtn.classList.add('btn-action');
-            let amountToClean = Math.min(10, data.toxicPuddlesCount);
+            let amountToClean = puddleCount;
             let cost = amountToClean * 10;
 
-            if (data.toxicPuddlesCount === 0) {
+            if (puddleCount === 0) {
                 cleanBtn.innerHTML = this.getBtnHTML("STERILIZÁLÁS PROTOKOLL", "", "A Szektor mentes minden biomasszától.", "KÖLTSÉG: 0 CR");
                 cleanBtn.disabled = true;
             } else {
-                cleanBtn.innerHTML = this.getBtnHTML(`STERILIZÁLÁS (${amountToClean} db)`, "", "Toxikus biomassza megsemmisítése a területen.", `KÖLTSÉG: ${cost} CR`);
+                cleanBtn.innerHTML = this.getBtnHTML(`TELJES STERILIZÁLÁS (${amountToClean} db)`, "", "A szektor összes toxikus biomasszájának megsemmisítése.", `KÖLTSÉG: ${cost} CR`);
                 cleanBtn.disabled = (data.score < cost);
             }
-            cleanBtn.onclick = () => EventBus.emit('TRY_BUY_CLEAN', { price: cost, amountToClean });
+            cleanBtn.onclick = () => EventBus.emit('STERILIZATION_CONFIRMATION_REQUEST', {
+                puddleCount: amountToClean,
+                cost
+            });
         }
     }
 

@@ -16,6 +16,14 @@ class VFXManager {
         this.shockwaves = [];
         this.shockwavePool = [];
         this.fogTexture = null;
+        this.sterilizationFogTexture = null;
+        this.sterilizationSteamIntensity = 0;
+        this.sterilizationSceneFogColor = null;
+        this.sterilizationSceneFogDensity = null;
+        this.sterilizationSceneBackground = null;
+        this.sterilizationWhite = new THREE.Color(0xffffff);
+        this.healingSteamIntensity = 0;
+        this.healingSteamTickTimer = 0;
         this.corridorSmokePuffs = [];
         this.freeCorridorSmokePuffs = [];
         
@@ -40,6 +48,7 @@ class VFXManager {
         this.createBloodPool();
         this.createRadSystem();
         this.createFogSystem();
+        this.createSterilizationFogTexture();
     }
 
     bindEvents() {
@@ -55,6 +64,17 @@ class VFXManager {
         EventBus.on('SPAWN_TRACER', (data) => this.spawnBulletTracer(data));
         EventBus.on('SPAWN_SONIC_RINGS', (data) => this.spawnSonicRings(data));
         EventBus.on('UPDATE_TOXIC_FOG', (count) => this.updateFogOpacity(count));
+        EventBus.on('STERILIZATION_STEAM', (intensity) => this.setSterilizationSteam(intensity));
+        EventBus.on('GATES_STERILIZATION_TICK', (data) => this.spawnSterilizationSteam(data));
+        EventBus.on('HEALING_STEAM', (intensity) => {
+            this.healingSteamIntensity = THREE.MathUtils.clamp(intensity, 0, 1);
+        });
+        EventBus.on('STERILIZE_AIR', () => {
+            if (this.radSystem) this.radSystem.visible = false;
+        });
+        EventBus.on('WAVE_STARTED', () => {
+            if (this.radSystem) this.radSystem.visible = true;
+        });
         EventBus.on('RESONATOR_ZOMBIE_BURST', (data) => this.spawnResonatorBurst(data));
         EventBus.on('SET_FREEZE_VISUALS', (isFrozen) => this.setFreezeVisuals(isFrozen));
         EventBus.on('FREEZE_ENDED', () => this.setFreezeVisuals(false));
@@ -116,6 +136,50 @@ class VFXManager {
                 }
             }
         }
+    }
+
+    setSterilizationSteam(intensity) {
+        this.sterilizationSteamIntensity = THREE.MathUtils.clamp(intensity, 0, 1);
+        if (!this.scene) return;
+
+        if (this.sterilizationSteamIntensity > 0) {
+            if (!this.sterilizationSceneFogColor && this.scene.fog) {
+                this.sterilizationSceneFogColor = this.scene.fog.color.clone();
+                this.sterilizationSceneFogDensity = this.scene.fog.density;
+                this.sterilizationSceneBackground = this.scene.background && this.scene.background.isColor
+                    ? this.scene.background.clone()
+                    : null;
+            }
+
+            const whiteness = Math.pow(this.sterilizationSteamIntensity, 1.6);
+            if (this.scene.fog) {
+                this.scene.fog.color.copy(this.sterilizationSceneFogColor).lerp(
+                    this.sterilizationWhite,
+                    whiteness
+                );
+                this.scene.fog.density = THREE.MathUtils.lerp(
+                    this.sterilizationSceneFogDensity,
+                    0.32,
+                    whiteness
+                );
+            }
+            if (this.sterilizationSceneBackground && this.scene.background && this.scene.background.isColor) {
+                this.scene.background.copy(this.sterilizationSceneBackground).lerp(
+                    this.sterilizationWhite,
+                    whiteness
+                );
+            }
+            if (this.fogSystem && this.fogSystem.material) {
+                this.fogSystem.material.opacity = (this.lastPuddleCount || 0) / 200 * 0.6
+                    * (1 - this.sterilizationSteamIntensity);
+            }
+            return;
+        }
+
+        this.sterilizationSceneFogColor = null;
+        this.sterilizationSceneFogDensity = null;
+        this.sterilizationSceneBackground = null;
+        this.updateFogOpacity(this.lastPuddleCount || 0);
     }
 
     createBloodPool() {
@@ -488,6 +552,21 @@ class VFXManager {
         if (this.scene) this.scene.add(this.fogSystem);
     }
 
+    createSterilizationFogTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const context = canvas.getContext('2d');
+        const gradient = context.createRadialGradient(64, 64, 8, 64, 64, 62);
+        gradient.addColorStop(0, 'rgba(255,255,255,0.95)');
+        gradient.addColorStop(0.45, 'rgba(255,255,255,0.7)');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        context.fillStyle = gradient;
+        context.fillRect(0, 0, 128, 128);
+        this.sterilizationFogTexture = new THREE.CanvasTexture(canvas);
+        this.sterilizationFogTexture.needsUpdate = true;
+    }
+
     spawnSonicBoom(data) {
         if (!data) return;
         let pos = (data instanceof THREE.Vector3) ? data : (data.position || data);
@@ -703,8 +782,80 @@ class VFXManager {
         }
     }
 
-    _createGateSmokePuff(gate, isBurst) {
-        if (!this.scene || !this.fogTexture) return;
+    spawnSterilizationSteam(data) {
+        if (!data || !data.gates || !this.scene || !this.sterilizationFogTexture) return;
+        const intensity = THREE.MathUtils.clamp(data.intensity || 0, 0, 1);
+        const puffsPerGate = Math.ceil(1 + intensity * 2);
+        for (const gate of data.gates) {
+            for (let i = 0; i < puffsPerGate; i++) {
+                this._createGateSmokePuff(gate, false, intensity);
+            }
+        }
+    }
+
+    spawnHealingSteam(camera) {
+        if (!camera || !this.scene || !this.sterilizationFogTexture) return;
+        const count = Math.ceil(2 + this.healingSteamIntensity * 7);
+
+        for (let i = 0; i < count; i++) {
+            if (this.corridorSmokePuffs.length >= 200) return;
+            let puffData = this.freeCorridorSmokePuffs.pop();
+            if (!puffData) {
+                const material = new THREE.SpriteMaterial({
+                    map: this.sterilizationFogTexture,
+                    color: 0x42aaff,
+                    transparent: true,
+                    opacity: 0.38,
+                    blending: THREE.NormalBlending,
+                    depthWrite: false
+                });
+                const mesh = new THREE.Sprite(material);
+                mesh.visible = false;
+                this.scene.add(mesh);
+                puffData = {
+                    mesh,
+                    direction: new THREE.Vector3(),
+                    life: 0,
+                    speed: 0,
+                    growth: 0,
+                    rotSpeed: 0
+                };
+            }
+
+            const mesh = puffData.mesh;
+            mesh.material.map = this.sterilizationFogTexture;
+            mesh.material.color.setHex(0x42aaff);
+            mesh.material.opacity = 0.38;
+            mesh.material.blending = THREE.NormalBlending;
+            mesh.material.rotation = 0;
+            mesh.material.needsUpdate = true;
+            puffData.opacityMultiplier = 0.45;
+            const risingFromFloor = Math.random() < 0.5;
+            mesh.position.set(
+                camera.position.x + (Math.random() - 0.5) * 2.2,
+                risingFromFloor ? 0.15 + Math.random() * 0.55 : 3.0 + Math.random() * 0.8,
+                camera.position.z + (Math.random() - 0.5) * 2.2
+            );
+            const scale = 1.0 + Math.random() * 1.2 + this.healingSteamIntensity * 0.8;
+            mesh.scale.set(scale, scale, 1);
+            mesh.visible = true;
+            puffData.direction.set(
+                (Math.random() - 0.5) * 0.45,
+                (risingFromFloor ? 1 : -1) * (0.65 + Math.random() * 0.5),
+                (Math.random() - 0.5) * 0.45
+            ).normalize();
+            puffData.life = 1.2 + Math.random() * 0.45;
+            puffData.speed = 0.25 + Math.random() * 0.25;
+            puffData.growth = 1.3 + Math.random() * 1.2 + this.healingSteamIntensity * 1.2;
+            puffData.rotSpeed = (Math.random() - 0.5) * 0.5;
+            this.corridorSmokePuffs.push(puffData);
+        }
+    }
+
+    _createGateSmokePuff(gate, isBurst, sterilizationIntensity = 0) {
+        const isSterilizationSteam = sterilizationIntensity > 0;
+        const texture = isSterilizationSteam ? this.sterilizationFogTexture : this.fogTexture;
+        if (!this.scene || !texture) return;
         if (this.corridorSmokePuffs.length >= 200) return;
 
         let puffData = this.freeCorridorSmokePuffs.pop();
@@ -712,8 +863,8 @@ class VFXManager {
             if (this.corridorSmokePuffs.length >= 200) return;
 
             const puffMat = new THREE.SpriteMaterial({
-                map: this.fogTexture,
-                color: 0x22ff55,
+                map: texture,
+                color: isSterilizationSteam ? 0xffffff : 0x22ff55,
                 transparent: true,
                 opacity: 0.85,
                 blending: THREE.AdditiveBlending,
@@ -732,6 +883,10 @@ class VFXManager {
             };
         }
         const puff = puffData.mesh;
+        puff.material.map = texture;
+        puff.material.color.setHex(isSterilizationSteam ? 0xffffff : 0x22ff55);
+        puffData.opacityMultiplier = 1;
+        puff.material.needsUpdate = true;
 
         // Szétterülés a kapunyílás szélességében (5.0m mentén szórva)
         const lateralOffset = (Math.random() - 0.5) * 5.0;
@@ -746,7 +901,7 @@ class VFXManager {
         puff.position.set(posX, posY, posZ);
 
         // Kifelé mutató irányvektor, finom szóródással a nyaláb körül (Nexus Node stílus)
-        const pDir = puffData.direction.set(gate.outX, 0.08, gate.outZ);
+        const pDir = puffData.direction.set(gate.outX, isSterilizationSteam ? 0.28 : 0.08, gate.outZ);
         if (gate.isXAxis) {
             pDir.x += (Math.random() - 0.5) * 0.25;
             pDir.z += (Math.random() - 0.5) * 0.12;
@@ -757,13 +912,21 @@ class VFXManager {
         pDir.y += (Math.random() - 0.5) * 0.08;
         pDir.normalize();
 
-        const initialScale = Math.random() * 1.5 + 2.0;
+        const initialScale = isSterilizationSteam
+            ? Math.random() * (2 + sterilizationIntensity * 3) + 3 + sterilizationIntensity * 3
+            : Math.random() * 1.5 + 2.0;
         puff.scale.set(initialScale, initialScale, 1);
 
         puff.visible = true;
-        puffData.life = isBurst ? (Math.random() * 0.3 + 1.1) : (Math.random() * 0.3 + 0.85);
-        puffData.speed = isBurst ? (Math.random() * 4.0 + 8.0) : (Math.random() * 3.0 + 5.5);
-        puffData.growth = Math.random() * 6.0 + 5.0;
+        puffData.life = isSterilizationSteam
+            ? Math.random() * 1.2 + 2.2
+            : (isBurst ? (Math.random() * 0.3 + 1.1) : (Math.random() * 0.3 + 0.85));
+        puffData.speed = isSterilizationSteam
+            ? Math.random() * 2.0 + 2.5 + sterilizationIntensity * 2
+            : (isBurst ? (Math.random() * 4.0 + 8.0) : (Math.random() * 3.0 + 5.5));
+        puffData.growth = isSterilizationSteam
+            ? Math.random() * 4.0 + 5.0 + sterilizationIntensity * 5
+            : Math.random() * 6.0 + 5.0;
         puffData.rotSpeed = (Math.random() - 0.5) * 4.0;
         puffData.mesh.material.opacity = 0.85;
         puffData.mesh.material.rotation = 0;
@@ -774,6 +937,15 @@ class VFXManager {
         const cam = camera || this.camera;
         const camX = cam ? cam.position.x : 0;
         const camZ = cam ? cam.position.z : 0;
+        if (this.healingSteamIntensity > 0 && cam) {
+            this.healingSteamTickTimer += delta;
+            if (this.healingSteamTickTimer >= 0.1) {
+                this.healingSteamTickTimer %= 0.1;
+                this.spawnHealingSteam(cam);
+            }
+        } else {
+            this.healingSteamTickTimer = 0;
+        }
 
         // 1. Radioaktív por (radSystem) lebegése, hullámzása és örvénylése (pontosan mint a régi kód 5009. sorában)
         if (this.radSystem) {
@@ -977,7 +1149,7 @@ class VFXManager {
                 sw.mesh.position.addScaledVector(sw.direction, sw.speed * delta);
 
                 sw.mesh.material.rotation += sw.rotSpeed * delta;
-                sw.mesh.material.opacity = Math.max(0, sw.life * 0.85);
+                sw.mesh.material.opacity = Math.max(0, sw.life * 0.85 * (sw.opacityMultiplier || 1));
 
                 if (sw.life <= 0) {
                     sw.mesh.visible = false;
@@ -1015,6 +1187,7 @@ class VFXManager {
     }
 
     reset() {
+        if (this.radSystem) this.radSystem.visible = true;
         if (this.shockwaves) {
             for (let sw of this.shockwaves) {
                 if (this.scene && sw.mesh) this.scene.remove(sw.mesh);

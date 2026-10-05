@@ -56,6 +56,7 @@ class ItemManager {
         });
         EventBus.on('ENTITY_TAKE_DAMAGE', (data) => this.onPlantDamage(data));
         EventBus.on('CLEAN_TOXIC_PUDDLES', (count) => this.cleanToxicPuddles(count));
+        EventBus.on('STERILIZE_SECTOR', () => this.sterilizeSector());
         EventBus.on('DAMAGE_TAKEN', () => {
             if (this.isLootingActive) {
                 this.isLootingActive = false;
@@ -816,6 +817,13 @@ class ItemManager {
             }
         }
         EventBus.emit('UPDATE_TOXIC_FOG', this.toxicPuddles.length);
+    }
+
+    sterilizeSector() {
+        this.cleanToxicPuddles(this.toxicPuddles.length);
+        for (const plant of this.activePlants) {
+            if (plant.puddle) plant.puddle.visible = false;
+        }
     }
 }
 

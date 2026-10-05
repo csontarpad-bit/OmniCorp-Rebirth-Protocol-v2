@@ -32,6 +32,10 @@ class LevelManager {
         this.isDoorsOpen = false;
         this.smokeTickTimer = 0.0;
         this.corridorFogMat = null;
+        this.sterilizationSteamIntensity = 0;
+        this.sterilizationLights = [];
+        this.sterilizationLightSnapshots = null;
+        this.sterilizationWhite = new THREE.Color(0xffffff);
 
         this.regenerationPod = null;
         this.podStatusScreen = null;
@@ -56,6 +60,7 @@ class LevelManager {
         EventBus.on('CLOSE_AIRLOCK_GATES', (data) => this.closeDoors(data ? data.duration : 1.5));
         EventBus.on('TERMINAL_SESSION_ACTIVE', () => this.setTerminalActive(true));
         EventBus.on('TERMINAL_RESET', () => this.setTerminalActive(false));
+        EventBus.on('STERILIZATION_STEAM', (intensity) => this.setSterilizationSteam(intensity));
         });
     }
 
@@ -77,6 +82,8 @@ class LevelManager {
         this.corridorSpawns = [];
         this.doors = [];
         this.warningLights = [];
+        this.sterilizationLights = [];
+        this.sterilizationLightSnapshots = null;
         this.shaftLightTiers = [];
         this.dynamicLightCandidates = [];
         this.transitShutters = [];
@@ -424,6 +431,7 @@ class LevelManager {
             const pLight = new THREE.PointLight(0xff1500, 0.9, 8);
             pLight.position.copy(lightMesh.position);
             this.gatesGroup.add(pLight);
+            this.sterilizationLights.push({ light: pLight, mesh: lightMesh });
             const gateLight = { light: pLight, rangeSq: 64, distanceSq: Infinity, tier: null };
             this.dynamicLightCandidates.push(gateLight);
 
@@ -515,6 +523,7 @@ class LevelManager {
             const lamp = new THREE.PointLight(0x22ff55, 1.8, 16);
             lamp.position.set(corridorMidX, 4.8, corridorMidZ);
             this.gatesGroup.add(lamp);
+            this.sterilizationLights.push({ light: lamp, mesh: null });
             const corridorLight = { light: lamp, rangeSq: 256, distanceSq: Infinity, tier: null };
             this.dynamicLightCandidates.push(corridorLight);
 
@@ -819,6 +828,68 @@ class LevelManager {
         return list;
     }
 
+    setSterilizationSteam(intensity) {
+        this.sterilizationSteamIntensity = THREE.MathUtils.clamp(intensity, 0, 1);
+        if (this.sterilizationSteamIntensity > 0 && !this.sterilizationLightSnapshots) {
+            this.sterilizationLightSnapshots = this.sterilizationLights.map(({ light, mesh }) => ({
+                light,
+                mesh,
+                lightColor: light.color.clone(),
+                lightIntensity: light.intensity,
+                meshColor: mesh && mesh.material && mesh.material.color
+                    ? mesh.material.color.clone()
+                    : null
+            }));
+            if (this.podPowerLight) {
+                this.sterilizationLightSnapshots.push({
+                    light: this.podPowerLight,
+                    mesh: null,
+                    lightColor: this.podPowerLight.color.clone(),
+                    lightIntensity: this.podPowerLight.intensity,
+                    meshColor: null
+                });
+            }
+        }
+
+        if (this.sterilizationLightSnapshots) {
+            for (const snapshot of this.sterilizationLightSnapshots) {
+                snapshot.light.color.copy(snapshot.lightColor).lerp(
+                    this.sterilizationWhite,
+                    this.sterilizationSteamIntensity
+                );
+                snapshot.light.intensity = THREE.MathUtils.lerp(
+                    snapshot.lightIntensity,
+                    snapshot.lightIntensity * 1.8,
+                    this.sterilizationSteamIntensity
+                );
+                if (snapshot.meshColor && snapshot.mesh && snapshot.mesh.material) {
+                    snapshot.mesh.material.color.copy(snapshot.meshColor).lerp(
+                        this.sterilizationWhite,
+                        this.sterilizationSteamIntensity
+                    );
+                }
+            }
+        }
+
+        if (this.sterilizationSteamIntensity === 0) {
+            this.sterilizationLightSnapshots = null;
+        } else {
+            this.smokeTickTimer = Math.max(this.smokeTickTimer, 0.1);
+        }
+    }
+
+    emitSterilizationSteam(delta) {
+        if (this.sterilizationSteamIntensity <= 0) return;
+        this.smokeTickTimer += delta;
+        if (this.smokeTickTimer < 0.07) return;
+
+        this.smokeTickTimer = 0;
+        EventBus.emit('GATES_STERILIZATION_TICK', {
+            gates: this.getGatePouringPositions(),
+            intensity: this.sterilizationSteamIntensity
+        });
+    }
+
     // --- ZSILIPKAPU NYITÁS ÉS ZÁRÁS VEZÉRLÉS ---
     openDoors(duration = 7.5) {
         this.isDoorsOpen = true;
@@ -1064,20 +1135,21 @@ class LevelManager {
         } else {
             for (let i = 0; i < this.warningLights.length; i++) {
                 const wl = this.warningLights[i];
-                if (wl.light && wl.light.intensity !== 0.9) {
+                if (this.sterilizationSteamIntensity === 0 && wl.light && wl.light.intensity !== 0.9) {
                     wl.light.intensity = 0.9;
                 }
             }
         }
 
         // 5. Zsilipkapuk sűrű zöld füstjének kifele ömlése a platform padlójára
-        if (this.isDoorsOpen) {
+        if (this.isDoorsOpen && this.sterilizationSteamIntensity === 0) {
             this.smokeTickTimer = (this.smokeTickTimer || 0) + delta;
             if (this.smokeTickTimer >= 0.10) {
                 this.smokeTickTimer = 0;
                 EventBus.emit('GATES_SMOKE_TICK', { gates: this.getGatePouringPositions() });
             }
         }
+        this.emitSterilizationSteam(delta);
 
         // Belső folyosói füstfüggöny textúra finom lebegtetése
         if (this.corridorFogMat && this.corridorFogMat.map) {

@@ -548,6 +548,102 @@ body.drugged {
     background: transparent; border: none; box-shadow: none; backdrop-filter: none;
     animation: popUp 2s ease-out forwards; /* Megjelenik és eltűnik */
 }
+
+#wave-display.wave-briefing {
+    position: fixed;
+    top: 38%;
+    left: 28px;
+    max-width: min(360px, calc(100vw - 56px));
+    transform: none;
+    padding: 9px 14px;
+    color: rgba(205, 230, 232, 0.88);
+    background: rgba(4, 14, 18, 0.38);
+    border: 0;
+    border-left: 2px solid rgba(102, 194, 199, 0.65);
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: blur(3px);
+    text-align: left;
+    text-transform: none;
+    letter-spacing: 1px;
+    font-size: 16px;
+    font-weight: 400;
+    text-shadow: 0 1px 5px #000;
+    animation: briefingFadeIn 0.3s ease-out both;
+}
+
+@keyframes briefingFadeIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+#sterilization-confirm-overlay,
+#healing-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 10, 13, 0.82);
+    backdrop-filter: blur(5px);
+}
+
+.sterilization-confirm-panel {
+    width: min(100%, 480px);
+    padding: 28px;
+    color: #d7eeee;
+    background: rgba(4, 18, 21, 0.98);
+    border: 1px solid #6ab8b8;
+    box-shadow: 0 0 24px rgba(65, 180, 180, 0.22);
+    font-family: 'Share Tech Mono', monospace;
+}
+
+.sterilization-confirm-panel h2 {
+    margin: 0 0 14px;
+    color: #a7dddd;
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: 1px;
+}
+
+.sterilization-confirm-panel p {
+    color: #aababb;
+    line-height: 1.5;
+}
+
+.sterilization-confirm-total {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 14px 0;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(120, 180, 180, 0.2);
+}
+
+.sterilization-confirm-total strong { color: #c8eeee; }
+
+.sterilization-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 22px;
+}
+
+.sterilization-confirm-actions .cyber-btn {
+    padding: 9px 14px;
+    color: #9cbbbb;
+    border-color: #557979;
+    background: rgba(20, 40, 43, 0.7);
+}
+
+#confirm-sterilization { color: #b9e4dd; border-color: #7bb7a9; }
+.healing-confirm-panel { border-color: #429ce0; box-shadow: 0 0 24px rgba(65, 156, 224, 0.25); }
+.healing-confirm-panel h2,
+#healing-confirm-amount,
+#healing-confirm-cost { color: #8dcaff; }
+#confirm-healing { color: #9dd4ff; border-color: #428dc2; }
 /* HP Gyorsművelet Gomb (Piros) */
 .btn-heal { border-left-color: #ff3333; border-color: #550000; background: rgba(30, 0, 0, 0.6); }
 .btn-heal:hover:not(:disabled) { border-left-color: #ff0000; border-color: #ff0000; box-shadow: 0 0 15px rgba(255, 0, 0, 0.3); }

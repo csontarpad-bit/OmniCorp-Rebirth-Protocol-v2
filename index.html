@@ -543,6 +543,42 @@
 
         </div> <!-- EZ ZÁRJA A GAME-UI-WRAPPER-T TÉNYLEGESEN! -->
 
+        <div id="sterilization-confirm-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="sterilization-confirm-title">
+            <div class="sterilization-confirm-panel">
+                <h2 id="sterilization-confirm-title">STERILIZÁLÁS MEGERŐSÍTÉSE</h2>
+                <p>A teljes szektor megtisztítása elindítja a kabin sterilizáló ciklusát.</p>
+                <div class="sterilization-confirm-total">
+                    <span>Pocsolyák összesen</span>
+                    <strong id="sterilization-confirm-count">0</strong>
+                </div>
+                <div class="sterilization-confirm-total">
+                    <span>Fizetendő összeg</span>
+                    <strong id="sterilization-confirm-cost">0 CR</strong>
+                </div>
+                <div class="sterilization-confirm-actions">
+                    <button id="cancel-sterilization" class="cyber-btn">MÉGSE</button>
+                    <button id="confirm-sterilization" class="cyber-btn">STERILIZÁLÁS</button>
+                </div>
+            </div>
+        </div>
+        <div id="healing-confirm-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="healing-confirm-title">
+            <div class="sterilization-confirm-panel healing-confirm-panel">
+                <h2 id="healing-confirm-title">BIOLÓGIAI HELYREÁLLÍTÁS</h2>
+                <p>A kabin regeneráló ciklusa teljesen helyreállítja a klóntest életerejét.</p>
+                <div class="sterilization-confirm-total">
+                    <span>Helyreállítás</span>
+                    <strong id="healing-confirm-amount">+0 HP</strong>
+                </div>
+                <div class="sterilization-confirm-total">
+                    <span>Fizetendő összeg</span>
+                    <strong id="healing-confirm-cost">0 CR</strong>
+                </div>
+                <div class="sterilization-confirm-actions">
+                    <button id="cancel-healing" class="cyber-btn">MÉGSE</button>
+                    <button id="confirm-healing" class="cyber-btn">GYÓGYÍTÁS</button>
+                </div>
+            </div>
+        </div>
 
         <!-- ========================================== -->
         <!-- SZÜNET (PAUSE) MENÜ -->

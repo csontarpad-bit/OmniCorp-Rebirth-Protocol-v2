@@ -24,6 +24,9 @@ export class GameManager {
         this.terminalSequenceTime = 0;
         this.terminalMoveFrom = null;
         this.terminalMoveTo = null;
+        this.terminalHealingOriginal = null;
+        this.terminalHealingLookUp = null;
+        this.terminalHealingLookDown = null;
         this.hasStartedAnyWave = false;
         this.lastWaveBonus = 0;
         this.pauseStartTime = 0;
@@ -457,9 +460,16 @@ export class GameManager {
         EventBus.emit('WAVE_COMPLETED', { wave: this.currentWave, bonus: this.lastWaveBonus });
         EventBus.emit('UI_UPDATE_NEEDED');
 
+        if (this.shopLockedForNextWave) {
+            this.shopLockedForNextWave = false;
+            this.startWaveCountdown(false);
+            return;
+        }
+
         this.terminalReady = true;
         this.gameState = 'PLAYING';
         EventBus.emit('TERMINAL_ACTIVATED', { wave: this.currentWave });
+        EventBus.emit('TERMINAL_AVAILABLE', { wave: this.currentWave });
         this.updateTerminalProximity();
     }
 
@@ -557,6 +567,14 @@ export class GameManager {
         if (!this.player || !this.player.camera || !this.levelManager) return;
         if (this.weaponSystem) this.weaponSystem.updateTerminalTransition(delta);
         this.terminalSequenceTime += delta;
+        if (this.terminalSequence === 'healing') {
+            this.updateHealingSequence();
+            return;
+        }
+        if (this.terminalSequence === 'sterilization') {
+            this.updateSterilizationSequence();
+            return;
+        }
 
         if (this.terminalSequence === 'enter-opening' && this.levelManager.podDoorProgress >= 0.98) {
             this.startTerminalMove({ x: 0, y: 1.6, z: 0.15 }, 'enter-moving');
@@ -751,6 +769,7 @@ export class GameManager {
     sendShopData() {
         let currentWId = this.weaponSystem ? this.weaponSystem.currentWeaponId : 'pistol';
         let puddlesCount = (this.itemManager && this.itemManager.toxicPuddles) ? this.itemManager.toxicPuddles.length : 0;
+        let sterilizationPuddleCount = this.getSterilizablePuddleCount();
 
         let needsAmmo = false;
         for (let key in weapons) {
@@ -774,6 +793,7 @@ export class GameManager {
             playerResonators: this.player ? this.player.resonators : 0,
             maxResonators: 1,
             toxicPuddlesCount: puddlesCount,
+            sterilizationPuddleCount,
             needsAmmo: needsAmmo,
             playerStats: playerStats,
             shopLockedForNextWave: this.shopLockedForNextWave || false
@@ -912,6 +932,8 @@ export class GameManager {
     }
 
     onTryBuyHeal(data) {
+        if (!data || !data.confirmed || this.gameState !== 'SHOPPING' || this.terminalSequence !== 'menu') return;
+
         let maxHP = 100 + (skills.maxHealth ? skills.maxHealth.level * 20 : 0);
         let missingHP = this.player ? (maxHP - this.player.health) : 0;
         let healCost = Math.ceil(missingHP * 2);
@@ -930,6 +952,79 @@ export class GameManager {
         EventBus.emit('PLAY_SOUND', { id: 'purchase' });
         EventBus.emit('PURCHASE_SUCCESS');
         this.sendShopData();
+        const rotation = new THREE.Euler().setFromQuaternion(this.player.camera.quaternion, 'YXZ');
+        this.terminalHealingOriginal = this.player.camera.quaternion.clone();
+        this.terminalHealingLookUp = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(rotation.x - 0.2, rotation.y, rotation.z, 'YXZ')
+        );
+        this.terminalHealingLookDown = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(rotation.x + 0.2, rotation.y, rotation.z, 'YXZ')
+        );
+        this.gameState = 'TERMINAL_TRANSITION';
+        this.terminalSequence = 'healing';
+        this.terminalSequenceTime = 0;
+        EventBus.emit('HEALING_STARTED');
+        EventBus.emit('HEALING_STEAM', 0);
+    }
+
+    updateHealingSequence() {
+        const elapsed = this.terminalSequenceTime;
+        const ease = (progress) => {
+            const clamped = Math.min(1, Math.max(0, progress));
+            return clamped * clamped * (3 - 2 * clamped);
+        };
+        const camera = this.player.camera;
+        let steamIntensity = 0;
+
+        if (elapsed < 8.5) {
+            steamIntensity = ease(elapsed / 8.5);
+        } else if (elapsed < 9.5) {
+            steamIntensity = 1 - ease((elapsed - 8.5) / 1);
+        }
+
+        if (elapsed < 0.8) {
+            camera.quaternion.copy(this.terminalHealingOriginal);
+        } else if (elapsed < 2.4) {
+            camera.quaternion.slerpQuaternions(
+                this.terminalHealingOriginal,
+                this.terminalHealingLookUp,
+                ease((elapsed - 0.8) / 1.6)
+            );
+        } else if (elapsed < 3.6) {
+            camera.quaternion.copy(this.terminalHealingLookUp);
+        } else if (elapsed < 5.2) {
+            camera.quaternion.slerpQuaternions(
+                this.terminalHealingLookUp,
+                this.terminalHealingLookDown,
+                ease((elapsed - 3.6) / 1.6)
+            );
+        } else if (elapsed < 6.4) {
+            camera.quaternion.copy(this.terminalHealingLookDown);
+        } else if (elapsed < 8.0) {
+            camera.quaternion.slerpQuaternions(
+                this.terminalHealingLookDown,
+                this.terminalHealingOriginal,
+                ease((elapsed - 6.4) / 1.6)
+            );
+        } else {
+            camera.quaternion.copy(this.terminalHealingOriginal);
+        }
+
+        EventBus.emit('HEALING_STEAM', steamIntensity);
+
+        if (elapsed >= 11) {
+            EventBus.emit('HEALING_STEAM', 0);
+            camera.quaternion.copy(this.terminalHealingOriginal);
+            const inputManager = this.player.inputManagerRef;
+            if (inputManager) {
+                const rotation = new THREE.Euler().setFromQuaternion(this.terminalHealingOriginal, 'YXZ');
+                inputManager.yaw = rotation.y;
+                inputManager.pitch = rotation.x;
+            }
+            this.terminalSequence = 'menu';
+            this.gameState = 'SHOPPING';
+            EventBus.emit('HEALING_COMPLETED');
+        }
     }
 
     onTryBuyArmor(data) {
@@ -955,20 +1050,120 @@ export class GameManager {
     }
 
     onTryBuyClean(data) {
-        let puddlesCount = (this.itemManager && this.itemManager.toxicPuddles) ? this.itemManager.toxicPuddles.length : 0;
-        let amountToClean = Math.min(10, puddlesCount);
-        let cost = amountToClean * 10;
+        if (!data || !data.confirmed || this.gameState !== 'SHOPPING' || this.terminalSequence !== 'menu') return;
 
-        if (this.score < cost || amountToClean <= 0) {
+        let puddlesCount = this.getSterilizablePuddleCount();
+        let cost = puddlesCount * 10;
+
+        if (this.score < cost || puddlesCount <= 0) {
             EventBus.emit('PURCHASE_FAILED');
+            this.sendShopData();
             return;
         }
 
         this.score -= cost;
-        EventBus.emit('CLEAN_TOXIC_PUDDLES', amountToClean);
         EventBus.emit('PLAY_SOUND', { id: 'purchase' });
         EventBus.emit('PURCHASE_SUCCESS');
+        this.beginSterilization(puddlesCount);
         this.sendShopData();
+    }
+
+    beginSterilization(puddleCount) {
+        const camera = this.player.camera;
+        const rotation = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+        this.terminalSterilizationOriginal = camera.quaternion.clone();
+        this.terminalSterilizationSide = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(rotation.x, rotation.y + Math.PI / 2, 0, 'YXZ')
+        );
+        this.terminalSterilizationLook = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(rotation.x, rotation.y - Math.PI / 3, 0, 'YXZ')
+        );
+        this.terminalSterilizationCleaned = false;
+        this.terminalSterilizationDoorsClosing = false;
+        this.gameState = 'TERMINAL_TRANSITION';
+        this.terminalSequence = 'sterilization';
+        this.terminalSequenceTime = 0;
+        EventBus.emit('STERILIZATION_STEAM', 0);
+        EventBus.emit('STERILIZATION_STARTED', { puddleCount });
+    }
+
+    getSterilizablePuddleCount() {
+        if (!this.itemManager) return 0;
+        const toxicPuddles = this.itemManager.toxicPuddles || [];
+        const plantPuddles = (this.itemManager.activePlants || [])
+            .filter(plant => plant.puddle && plant.puddle.visible).length;
+        return toxicPuddles.length + plantPuddles;
+    }
+
+    updateSterilizationSequence() {
+        const elapsed = this.terminalSequenceTime;
+        const ease = (progress) => {
+            const clamped = Math.min(1, Math.max(0, progress));
+            return clamped * clamped * (3 - 2 * clamped);
+        };
+        const camera = this.player.camera;
+        let steamIntensity = 0;
+
+        if (elapsed < 3.0) {
+            const progress = ease(elapsed / 3.0);
+            camera.quaternion.slerpQuaternions(
+                this.terminalSterilizationOriginal,
+                this.terminalSterilizationSide,
+                progress
+            );
+            steamIntensity = progress * 0.14;
+        } else if (elapsed < 6.0) {
+            camera.quaternion.copy(this.terminalSterilizationSide);
+            steamIntensity = 0.14 + 0.36 * ease((elapsed - 3.0) / 3.0);
+        } else if (elapsed < 8.5) {
+            camera.quaternion.copy(this.terminalSterilizationSide);
+            steamIntensity = 0.5 + 0.5 * ease((elapsed - 6.0) / 2.5);
+            if (!this.terminalSterilizationDoorsClosing) {
+                this.terminalSterilizationDoorsClosing = true;
+                this.levelManager.closeDoors(2.5);
+            }
+        } else if (elapsed < 9.2) {
+            camera.quaternion.copy(this.terminalSterilizationSide);
+            steamIntensity = 1;
+            if (!this.terminalSterilizationCleaned) {
+                this.terminalSterilizationCleaned = true;
+                EventBus.emit('STERILIZE_SECTOR');
+                EventBus.emit('STERILIZE_AIR');
+            }
+        } else if (elapsed < 10.8) {
+            camera.quaternion.copy(this.terminalSterilizationSide);
+            steamIntensity = 1 - 0.95 * ease((elapsed - 9.2) / 1.6);
+        } else if (elapsed < 11.4) {
+            camera.quaternion.slerpQuaternions(
+                this.terminalSterilizationSide,
+                this.terminalSterilizationLook,
+                ease((elapsed - 10.8) / 0.6)
+            );
+        } else if (elapsed < 12) {
+            camera.quaternion.slerpQuaternions(
+                this.terminalSterilizationLook,
+                this.terminalSterilizationOriginal,
+                ease((elapsed - 11.4) / 0.6)
+            );
+        } else {
+            camera.quaternion.copy(this.terminalSterilizationOriginal);
+        }
+
+        EventBus.emit('STERILIZATION_STEAM', steamIntensity);
+
+        if (elapsed >= 12) {
+            EventBus.emit('STERILIZATION_STEAM', 0);
+            camera.quaternion.copy(this.terminalSterilizationOriginal);
+            const inputManager = this.player.inputManagerRef;
+            if (inputManager) {
+                const rotation = new THREE.Euler().setFromQuaternion(this.terminalSterilizationOriginal, 'YXZ');
+                inputManager.yaw = rotation.y;
+                inputManager.pitch = rotation.x;
+            }
+            this.terminalSequence = 'menu';
+            this.gameState = 'SHOPPING';
+            EventBus.emit('STERILIZATION_COMPLETED');
+        }
     }
 
     onTryBuyResonator(data) {

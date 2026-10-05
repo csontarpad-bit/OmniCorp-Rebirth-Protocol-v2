@@ -229,6 +229,7 @@ function animate() {
         if (typeof gameManager.update === 'function') gameManager.update(delta);
     } else if (gameManager.gameState === 'TERMINAL_TRANSITION') {
         if (typeof LevelManager.update === 'function') LevelManager.update(delta);
+        if (typeof VFXManager.update === 'function') VFXManager.update(delta, player ? player.camera : Engine.camera);
         if (typeof gameManager.update === 'function') gameManager.update(delta);
     } else if (gameManager.gameState === 'SHOPPING') {
         if (typeof LevelManager.update === 'function') LevelManager.update(delta);
