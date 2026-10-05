@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import EventBus from './EventBus.js';
 import { weapons, skills, OmniCorpDirectives } from './Database.js';
 import { playerStats, savePlayerStats } from './RuntimeState.js';
@@ -477,7 +478,19 @@ export class GameManager {
         const { x, z } = this.player.camera.position;
         const doorwayZ = 4.45 * (3.2 / 9.8);
         const isNearTerminal = Math.hypot(x, z - doorwayZ) <= 0.9;
-        this.setTerminalPromptVisible(isNearTerminal);
+        this.setTerminalPromptVisible(isNearTerminal && this.isFacingTerminalDoor(doorwayZ));
+    }
+
+    isFacingTerminalDoor(doorwayZ) {
+        const camera = this.player.camera;
+        const toDoor = new THREE.Vector3(-camera.position.x, 0, doorwayZ - camera.position.z);
+        if (toDoor.lengthSq() === 0) return false;
+
+        const forward = camera.getWorldDirection(new THREE.Vector3());
+        forward.y = 0;
+        forward.normalize();
+
+        return forward.dot(toDoor.normalize()) >= Math.SQRT1_2;
     }
 
     tryActivateTerminal() {
@@ -485,7 +498,7 @@ export class GameManager {
 
         const { x, z } = this.player.camera.position;
         const doorwayZ = 4.45 * (3.2 / 9.8);
-        if (Math.hypot(x, z - doorwayZ) > 0.9) return;
+        if (Math.hypot(x, z - doorwayZ) > 0.9 || !this.isFacingTerminalDoor(doorwayZ)) return;
 
         EventBus.emit('CONSUME_INTERACTION');
         this.setTerminalPromptVisible(false);
@@ -495,6 +508,7 @@ export class GameManager {
     beginTerminalEntry() {
         if (!this.levelManager || this.terminalSequence !== 'idle') return;
         EventBus.emit('CLEAR_CORPSES');
+        if (this.weaponSystem) this.weaponSystem.holsterForTerminal();
         this.gameState = 'TERMINAL_TRANSITION';
         this.terminalSequence = 'enter-opening';
         this.terminalSequenceTime = 0;
@@ -522,14 +536,32 @@ export class GameManager {
         this.terminalSequenceTime = 0;
     }
 
+    startTerminalExitTurn() {
+        const camera = this.player.camera;
+        const exitDirection = new THREE.Vector3(-camera.position.x, 0, 2.2 - camera.position.z);
+        if (exitDirection.lengthSq() === 0) exitDirection.set(0, 0, 1);
+        exitDirection.normalize();
+
+        const targetYaw = Math.atan2(-exitDirection.x, -exitDirection.z);
+        const currentRotation = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+        this.terminalTurnFrom = camera.quaternion.clone();
+        this.terminalTurnTo = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(currentRotation.x, targetYaw, 0, 'YXZ')
+        );
+        this.terminalTurnYaw = targetYaw;
+        this.terminalSequence = 'exit-turning';
+        this.terminalSequenceTime = 0;
+    }
+
     updateTerminalSequence(delta) {
         if (!this.player || !this.player.camera || !this.levelManager) return;
+        if (this.weaponSystem) this.weaponSystem.updateTerminalTransition(delta);
         this.terminalSequenceTime += delta;
 
         if (this.terminalSequence === 'enter-opening' && this.levelManager.podDoorProgress >= 0.98) {
             this.startTerminalMove({ x: 0, y: 1.6, z: 0.15 }, 'enter-moving');
         } else if (this.terminalSequence === 'enter-moving') {
-            const progress = Math.min(1, this.terminalSequenceTime / 0.85);
+            const progress = Math.min(1, this.terminalSequenceTime / 1.0);
             const eased = progress * progress * (3 - 2 * progress);
             this.player.camera.position.set(
                 this.terminalMoveFrom.x + (this.terminalMoveTo.x - this.terminalMoveFrom.x) * eased,
@@ -550,9 +582,19 @@ export class GameManager {
                 terminal: true
             });
         } else if (this.terminalSequence === 'exit-opening' && this.levelManager.podDoorProgress >= 0.98) {
-            this.startTerminalMove({ x: 0, y: 1.6, z: 2.2 }, 'exit-moving');
+            this.startTerminalExitTurn();
+        } else if (this.terminalSequence === 'exit-turning') {
+            const progress = Math.min(1, this.terminalSequenceTime / 0.55);
+            const eased = progress * progress * (3 - 2 * progress);
+            this.player.camera.quaternion.slerpQuaternions(this.terminalTurnFrom, this.terminalTurnTo, eased);
+            if (progress >= 1) {
+                this.player.camera.quaternion.copy(this.terminalTurnTo);
+                const inputManager = this.player.inputManagerRef || (this.weaponSystem && this.weaponSystem.inputManagerRef);
+                if (inputManager) inputManager.yaw = this.terminalTurnYaw;
+                this.startTerminalMove({ x: 0, y: 1.6, z: 2.2 }, 'exit-moving');
+            }
         } else if (this.terminalSequence === 'exit-moving') {
-            const progress = Math.min(1, this.terminalSequenceTime / 0.85);
+            const progress = Math.min(1, this.terminalSequenceTime / 1.1);
             const eased = progress * progress * (3 - 2 * progress);
             this.player.camera.position.set(
                 this.terminalMoveFrom.x + (this.terminalMoveTo.x - this.terminalMoveFrom.x) * eased,
@@ -563,6 +605,7 @@ export class GameManager {
                 this.terminalSequence = 'exit-closing';
                 this.terminalSequenceTime = 0;
                 this.levelManager.setPodDoorOpen(false);
+                if (this.weaponSystem) this.weaponSystem.drawFromTerminal();
             }
         } else if (this.terminalSequence === 'exit-closing' && this.levelManager.podDoorProgress <= 0.02) {
             this.terminalSequence = 'idle';

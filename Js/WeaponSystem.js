@@ -45,6 +45,8 @@ export class WeaponSystem {
         this.currentAction = null;
         this.playerRef = null;
         this.inputManagerRef = null;
+        this.terminalWeaponHolstered = false;
+        this.terminalWeaponTransition = null;
 
     }
 
@@ -307,7 +309,69 @@ export class WeaponSystem {
         }
     }
 
+    holsterForTerminal() {
+        if (this.terminalWeaponHolstered) return;
+
+        this.isReloading = false;
+        this.cancelReloadRequested = true;
+        EventBus.emit('RELOAD_END');
+        if (this.reloadInterval) {
+            clearInterval(this.reloadInterval);
+            this.reloadInterval = null;
+        }
+
+        const weaponId = this.currentWeaponId;
+        const action = this.playAnimation('hide', weaponId);
+        const duration = action && action._clip
+            ? action._clip.duration / action.timeScale
+            : 0.25;
+
+        this.terminalWeaponHolstered = true;
+        this.isWeaponBusy = true;
+        this.terminalWeaponTransition = { type: 'holster', weaponId, elapsed: 0, duration };
+        EventBus.emit('PLAY_SOUND', { id: 'holster' });
+    }
+
+    drawFromTerminal() {
+        if (!this.terminalWeaponHolstered) return;
+
+        const weaponId = this.currentWeaponId;
+        const model = this.weaponModels[weaponId];
+        if (model) model.visible = true;
+
+        const action = this.playAnimation('take', weaponId);
+        const duration = action && action._clip
+            ? action._clip.duration / action.timeScale
+            : 0.25;
+
+        this.terminalWeaponHolstered = false;
+        this.isWeaponBusy = true;
+        this.terminalWeaponTransition = { type: 'draw', weaponId, elapsed: 0, duration };
+    }
+
+    updateTerminalTransition(delta) {
+        for (const mixer of Object.values(this.weaponMixers)) {
+            if (mixer) mixer.update(delta);
+        }
+
+        if (!this.terminalWeaponTransition) return;
+
+        const transition = this.terminalWeaponTransition;
+        transition.elapsed += delta;
+        if (transition.elapsed < transition.duration) return;
+
+        if (transition.type === 'holster') {
+            const model = this.weaponModels[transition.weaponId];
+            if (model) model.visible = false;
+        }
+
+        this.terminalWeaponTransition = null;
+        this.isWeaponBusy = false;
+    }
+
     reset() {
+        this.terminalWeaponHolstered = false;
+        this.terminalWeaponTransition = null;
         for (let id in this.weaponModels) {
             if (this.weaponModels[id]) {
                 this.weaponModels[id].visible = false;
