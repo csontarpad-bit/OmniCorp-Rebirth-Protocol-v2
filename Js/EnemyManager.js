@@ -27,6 +27,7 @@ export class EnemyManager {
         this.spatialGridTimer = 0;
         this.collisionTimer = 0;
         this.currentWave = 1; // FIX: Hullámszám nyomonkövetése az animációs sebességhez
+        this.bossSpawnCursor = 0;
         this.activeResonatorScreams = {};
         this.globalHitboxMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: false, visible: false });
         
@@ -121,6 +122,7 @@ export class EnemyManager {
         this.activeFreezeTimer = 0;
         this.spatialGridTimer = 0;
         this.collisionTimer = 0;
+        this.bossSpawnCursor = 0;
 
         if (this.activeResonatorScreams) {
             for (let id in this.activeResonatorScreams) {
@@ -386,7 +388,13 @@ export class EnemyManager {
                 { x: 30.5,  z: 14,  dirX: -1, dirZ: 0 }
             ];
 
-        let pick = corridorSpawns[Math.floor(Math.random() * corridorSpawns.length)];
+        let pick;
+        if (type === 'boss') {
+            pick = corridorSpawns[this.bossSpawnCursor % corridorSpawns.length];
+            this.bossSpawnCursor++;
+        } else {
+            pick = corridorSpawns[Math.floor(Math.random() * corridorSpawns.length)];
+        }
         
         // Enyhe szórás a folyosó szélességén belül (+-1.4m), hogy a zombik ne egyetlen pontban álljanak
         // Boss esetén szigorúan 0 oldalirányú eltolás, hogy pontosan a kapu tengelyében maradjon!

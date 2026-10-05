@@ -3,6 +3,7 @@ import EventBus from './EventBus.js';
 import { OmniCorpDatabase, OmniCorpDirectives, weapons, skills } from './Database.js';
 import { playerStats, savePlayerStats } from './RuntimeState.js';
 import { renderArchiveStatHTML } from './UITemplates.js';
+import { getCampaignFloorInfo } from './Campaign.js';
 
 class UIManager {
     constructor() {
@@ -73,34 +74,60 @@ class UIManager {
         EventBus.on('STERILIZATION_STARTED', () => {
             if (this.shopMenu) this.shopMenu.classList.add('hidden');
         });
-        EventBus.on('STERILIZATION_COMPLETED', () => {
-            this.openShop({ terminal: true, silent: true });
-        });
+        EventBus.on('STERILIZATION_COMPLETED', () => this.reopenShop());
         EventBus.on('HEALING_CONFIRMATION_REQUEST', (data) => this.showHealingConfirmation(data));
         EventBus.on('HEALING_STARTED', () => {
             if (this.shopMenu) this.shopMenu.classList.add('hidden');
         });
-        EventBus.on('HEALING_COMPLETED', () => {
-            this.openShop({ terminal: true, silent: true });
-        });
+        EventBus.on('HEALING_COMPLETED', () => this.reopenShop());
         EventBus.on('SHOP_DATA_READY', (data) => {
             this.lastShopData = data;
             this.updateShopButtons(data);
         });
         EventBus.on('WAVE_STARTING', (data) => {
-            this.showWaveBriefing(`FELVONÓ: SÜLLYEDÉS A ${data.wave}. SZINTRE`);
+            const floorInfo = getCampaignFloorInfo(data.wave);
+            const label = floorInfo.bossCount
+                ? `KRONOS SZERVERTEREM // ${floorInfo.bossCount} NEXUS NODE`
+                : `${floorInfo.sector.name} SZEKTOR // ${data.wave}. EMELET`;
+            this.showWaveBriefing(`${label} — LIFTINDÍTÁS`);
         });
         EventBus.on('ELEVATOR_ARRIVED', (data) => {
-            this.showWaveBriefing(`${data.wave}. SZINT ELÉRVE`);
+            this.showWaveBriefing(`${data.wave}. EMELET ELÉRVE`);
         });
         EventBus.on('GATES_OPENING', () => {
             this.showWaveBriefing('ZSILIPKAPUK NYÍLNAK');
         });
         EventBus.on('WAVE_STARTED', (data) => {
-            this.showWaveBriefing(`${data.wave}. SZINT — FENYEGETÉS AKTÍV`, 1800);
+            const floorInfo = getCampaignFloorInfo(data.wave);
+            if (floorInfo.bossCount > 0) {
+                this.showWaveBriefing(
+                    data.wave === 100 ? '100. EMELET // VÉGSŐ HARC — 3 NEXUS NODE' : `${floorInfo.sector.name} SZERVERTEREM — ${floorInfo.bossCount} NEXUS NODE`,
+                    3200
+                );
+            } else {
+                this.showWaveBriefing(`${floorInfo.sector.name} SZEKTOR // ${data.wave}. EMELET`, 1800);
+            }
         });
         EventBus.on('TERMINAL_AVAILABLE', (data) => {
-            this.showWaveBriefing(`${data.wave}. HULLÁM LEZÁRVA — TERMINÁL ELÉRHETŐ [E]`, 3600);
+            this.showWaveBriefing(data.researchFloor
+                ? `KÖVETKEZŐ: ${data.researchFloor}. EMELET — R&D SZINT // KÖZÉPSŐ TERMINÁL [E]`
+                : `${data.wave}. EMELET LEZÁRVA — KÖZÉPSŐ TERMINÁL [E]`, 3600);
+        });
+        EventBus.on('RESEARCH_FLOOR_ENTERED', (data) => {
+            this.showWaveBriefing(`R&D SZINT // ${data.floor}. EMELET — BIZTONSÁGOS ZÓNA`, 3600);
+        });
+        EventBus.on('CAMPAIGN_COMPLETED', (data) => {
+            const heading = document.querySelector('#game-over h1');
+            const finalWave = document.getElementById('final-wave');
+            const finalScore = document.getElementById('final-score');
+            if (heading) heading.textContent = 'KRONOS PROTOKOLL MEGSZAKÍTVA';
+            if (finalWave) finalWave.textContent = `${data.floor}. EMELET — 3 NEXUS NODE LEGYŐZVE`;
+            if (finalScore) finalScore.textContent = `ADAT: ${data.score} CR`;
+            const overlay = document.getElementById('game-over');
+            const gameUI = document.getElementById('game-ui-wrapper');
+            if (overlay) overlay.classList.remove('hidden');
+            if (gameUI) gameUI.classList.add('hidden');
+            try { document.exitPointerLock(); } catch (error) { }
         });
         EventBus.on('GAME_OVER', (data) => {
             const fsEl = document.getElementById('final-score');
@@ -116,6 +143,10 @@ class UIManager {
         });
         EventBus.on('RETURN_TO_MAIN_MENU', () => {
             this.clearScreenBlood();
+            const heading = document.querySelector('#game-over h1');
+            if (heading) heading.textContent = 'MEGHALTÁL';
+            const finalWave = document.getElementById('final-wave');
+            if (finalWave) finalWave.textContent = 'TÚLÉLT HULLÁMOK: 0';
         });
         EventBus.on('START_GAME', () => {
             const goEl = document.getElementById('game-over');
@@ -996,6 +1027,13 @@ class UIManager {
             this.hsMsg.classList.remove('headshot-anim');
             void this.hsMsg.offsetWidth;
             this.hsMsg.classList.add('headshot-anim');
+            if (!this.hsMsgBound) {
+                this.hsMsgBound = true;
+                this.hsMsg.addEventListener('animationend', () => {
+                    this.hsMsg.classList.remove('headshot-anim');
+                    this.hsMsg.classList.add('hidden');
+                });
+            }
         }
     }
 
@@ -1092,7 +1130,7 @@ class UIManager {
     }
 
     showInteractPrompt(data) {
-        const prompt = data.type === 'terminal'
+        const prompt = data.type === 'terminal' || data.type === 'research'
             ? document.getElementById('terminal-interaction-prompt')
             : document.getElementById('loot-interaction-prompt') || document.getElementById('interact-prompt');
         if (prompt) {
@@ -1101,7 +1139,13 @@ class UIManager {
                 let text = "Interakció [E]";
                 if (data.type === 'health') text = "Gen-Stab felvétele [E]";
                 if (data.type === 'ammo') text = "Lőszer felvétele [E]";
-                if (data.type === 'terminal') text = "KABINBA LÉPÉS — [E] HASZNÁLAT";
+                if (data.type === 'research') {
+                    text = `${data.label || 'R&D ÁLLOMÁS'} — [E] HASZNÁLAT`;
+                } else if (data.type === 'terminal') {
+                    text = data.researchFloor
+                        ? `R&D MENEDÉK — ${data.researchFloor}. EMELET [E]`
+                        : 'KÖZÉPSŐ TERMINÁL — [E] HASZNÁLAT';
+                }
                 prompt.innerText = text;
             } else {
                 prompt.classList.add('hidden');
@@ -1216,15 +1260,33 @@ class UIManager {
                 EventBus.emit('CLOSE_SHOP');
             });
         }
+
+        const infectionCleanButton = document.getElementById('buy-infection-clean');
+        if (infectionCleanButton) {
+            infectionCleanButton.addEventListener('click', () => EventBus.emit('TRY_BUY_NEXUS_PURGE'));
+        }
     }
 
     openShop(data) {
+        this.activeShopContext = { ...data };
         try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) { }
         if (!data.silent) EventBus.emit('PLAY_SOUND', 'termOpen');
         if (this.shopMenu) this.shopMenu.classList.remove('hidden');
         document.getElementById('game-ui-wrapper').classList.add('hidden');
         const closeShopButton = document.getElementById('close-shop-btn');
-        if (closeShopButton) closeShopButton.innerText = data.terminal ? 'LIFT INDÍTÁSA' : 'KAPCSOLAT BONTÁSA';
+        if (closeShopButton) {
+            closeShopButton.innerText = data.hub
+                ? 'VISSZA AZ R&D MENEDÉKBE'
+                : data.terminal ? 'LIFT INDÍTÁSA' : 'KAPCSOLAT BONTÁSA';
+        }
+        const terminalHeader = document.querySelector('#shop-menu .terminal-header');
+        if (terminalHeader) {
+            const stationTitle = data.hub && data.researchStation ? this.researchStationThemes[data.researchStation] : null;
+            terminalHeader.textContent = stationTitle
+                ? `${stationTitle.title} // ${data.researchFloor}. EMELET`
+                : 'OMNICORP TERMINÁL';
+            terminalHeader.style.fontSize = stationTitle ? '28px' : '40px';
+        }
 
         const statsBar = document.getElementById('shop-points') ? document.getElementById('shop-points').parentNode.parentNode : null;
         const weaponBar = document.getElementById('shop-weapon-switches') ? document.getElementById('shop-weapon-switches').parentNode : null;
@@ -1268,11 +1330,166 @@ class UIManager {
         if (penaltyDiv) penaltyDiv.style.display = 'none';
 
         const tabWeaponsBtn = document.getElementById('tab-weapons');
+        const tabSkillsBtn = document.getElementById('tab-skills');
+        const tabDirectivesBtn = document.getElementById('tab-directives');
         const shopWeaponsDiv = document.getElementById('shop-weapons');
+        const shopSkillsDiv = document.getElementById('shop-skills');
+        const shopDirectivesDiv = document.getElementById('shop-directives');
         if (tabWeaponsBtn) tabWeaponsBtn.classList.add('active');
-        if (shopWeaponsDiv) shopWeaponsDiv.classList.remove('hidden');
+        if (tabSkillsBtn) tabSkillsBtn.classList.remove('active');
+        if (tabDirectivesBtn) tabDirectivesBtn.classList.remove('active');
+        if (shopWeaponsDiv) shopWeaponsDiv.classList.toggle('hidden', data.researchTab === 'skills');
+        if (shopSkillsDiv) shopSkillsDiv.classList.toggle('hidden', data.researchTab !== 'skills');
+        if (shopDirectivesDiv) shopDirectivesDiv.classList.add('hidden');
+        if (data.researchTab === 'skills') {
+            if (tabWeaponsBtn) tabWeaponsBtn.classList.remove('active');
+            if (tabSkillsBtn) tabSkillsBtn.classList.add('active');
+        }
+        this.applyResearchStationLayout(data);
+        const infectionCleanButton = document.getElementById('buy-infection-clean');
+        if (infectionCleanButton) {
+            const infection = Math.floor(data.playerInfection || 0);
+            const purgeCost = 2000;
+            infectionCleanButton.style.display =
+                data.hub && data.researchStation === 'regeneration' ? '' : 'none';
+            infectionCleanButton.innerHTML = this.getBtnHTML(
+                'NEXUS SYNC TISZTÍTÁS',
+                '',
+                infection > 0 ? `Fertőzöttség: ${infection}% → 0%` : 'A vér tiszta, nincs szükség kezelésre.',
+                infection > 0 ? `KÖLTSÉG: ${purgeCost} CR` : 'NINCS TEENDŐ'
+            );
+            infectionCleanButton.disabled = infection <= 0 || data.score < purgeCost;
+        }
 
         EventBus.emit('REQUEST_SHOP_UPDATE');
+    }
+
+    get researchStationThemes() {
+        return {
+            armory: { title: 'FEGYVERÉSZET', color: '#ffb347', sub: 'IPARI MOLEKULÁRIS KOHÓ // FEGYVER- ÉS LŐSZERGYÁRTÁS', buttons: ['buy-pistol', 'buy-shotgun', 'buy-rifle', 'buy-super', 'buy-ammo', 'buy-resonator'] },
+            augmentation: { title: 'MODIFIKÁCIÓ', color: '#00d9ff', sub: 'AUTO-DOKTOR // IMPLANTÁTUMOK ÉS NEURÁLIS FEJLESZTÉS', buttons: [] },
+            regeneration: { title: 'REGENERÁCIÓ', color: '#49bfff', sub: 'DIALÍZIS KAMRA // NEXUS SYNC TISZTÍTÁS ÉS GYÓGYÁSZAT', buttons: ['buy-infection-clean', 'buy-health', 'buy-medkit', 'buy-armor', 'buy-clean'] },
+            comms: { title: 'KOMMUNIKÁCIÓ', color: '#ff4f70', sub: 'ÓLOMFALAS RÁDIÓSZOBA // BIZTONSÁGOS CSATORNA', buttons: [] }
+        };
+    }
+
+    applyResearchStationLayout(data) {
+        const screen = document.getElementById('terminal-screen');
+        if (!screen) return;
+        if (this.defaultTerminalShadow === undefined) {
+            this.defaultTerminalShadow = screen.style.boxShadow;
+            this.defaultTerminalBorder = screen.style.borderColor;
+        }
+        const theme = data.hub && data.researchStation ? this.researchStationThemes[data.researchStation] : null;
+        const allButtons = document.querySelectorAll('#shop-weapons .shop-btn');
+        const weaponsDiv = document.getElementById('shop-weapons');
+        const skillsDiv = document.getElementById('shop-skills');
+        const wrapper = document.getElementById('shop-content-wrapper');
+        const statsBar = document.getElementById('shop-points') ? document.getElementById('shop-points').parentNode.parentNode : null;
+        const weaponBar = document.getElementById('shop-weapon-switches') ? document.getElementById('shop-weapon-switches').parentNode : null;
+        const tabsBar = document.querySelector('.shop-tabs');
+        const puddleInfo = document.getElementById('puddle-count') ? document.getElementById('puddle-count').parentNode : null;
+        let subtitle = document.getElementById('station-subtitle');
+        let commsPanel = document.getElementById('comms-panel');
+        if (commsPanel) commsPanel.style.display = 'none';
+        if (subtitle) subtitle.style.display = 'none';
+
+        if (!theme) {
+            screen.style.boxShadow = this.defaultTerminalShadow;
+            screen.style.borderColor = this.defaultTerminalBorder;
+            allButtons.forEach(button => { if (button.id !== 'buy-infection-clean') button.style.display = ''; });
+            if (puddleInfo) puddleInfo.style.display = '';
+            return;
+        }
+
+        screen.style.borderColor = theme.color;
+        screen.style.boxShadow = `0 0 30px ${theme.color}, inset 0 0 50px rgba(0, 0, 0, 0.8)`;
+        if (!subtitle) {
+            subtitle = document.createElement('div');
+            subtitle.id = 'station-subtitle';
+            subtitle.style.cssText = 'text-align:center; letter-spacing:3px; font-size:15px; margin-bottom:12px; padding-bottom:10px; border-bottom:1px dashed #333;';
+            const header = document.querySelector('#shop-menu .terminal-header');
+            header.parentNode.insertBefore(subtitle, header.nextSibling);
+        }
+        subtitle.style.display = 'block';
+        subtitle.style.color = theme.color;
+        subtitle.textContent = theme.sub;
+        if (tabsBar) tabsBar.style.display = 'none';
+
+        if (data.researchStation === 'comms') {
+            if (statsBar) statsBar.style.display = 'none';
+            if (weaponBar) weaponBar.style.display = 'none';
+            if (weaponsDiv) weaponsDiv.classList.add('hidden');
+            if (skillsDiv) skillsDiv.classList.add('hidden');
+            if (!commsPanel) {
+                commsPanel = document.createElement('div');
+                commsPanel.id = 'comms-panel';
+                wrapper.appendChild(commsPanel);
+            }
+            this.renderCommsPanel(commsPanel, data, theme);
+            return;
+        }
+
+        if (data.researchStation === 'augmentation') {
+            if (weaponBar) weaponBar.style.display = 'none';
+            if (weaponsDiv) weaponsDiv.classList.add('hidden');
+            if (skillsDiv) skillsDiv.classList.remove('hidden');
+            return;
+        }
+
+        if (skillsDiv) skillsDiv.classList.add('hidden');
+        if (weaponsDiv) weaponsDiv.classList.remove('hidden');
+        if (data.researchStation === 'regeneration' && weaponBar) weaponBar.style.display = 'none';
+        allButtons.forEach(button => {
+            if (button.id === 'buy-infection-clean') return;
+            button.style.display = theme.buttons.includes(button.id) ? '' : 'none';
+        });
+        if (puddleInfo) puddleInfo.style.display = data.researchStation === 'regeneration' ? '' : 'none';
+    }
+
+    renderCommsPanel(panel, data, theme) {
+        const log = data.commsLog || [];
+        const latest = log[log.length - 1];
+        panel.style.display = 'block';
+        panel.innerHTML = '';
+        if (!latest) {
+            panel.innerHTML = '<div style="color:#888; text-align:center; margin-top:40px;">NINCS BEJÖVŐ ADÁS</div>';
+            return;
+        }
+        const color = theme.color;
+        const head = document.createElement('div');
+        head.style.cssText = `display:flex; justify-content:space-between; font-size:16px; color:${color}; margin-bottom:10px; letter-spacing:2px;`;
+        head.innerHTML = `<span>● ADÁS: G. GALLAGHER</span><span>JEL: ${latest.signal}</span>`;
+        const box = document.createElement('div');
+        box.style.cssText = `border:1px solid ${color}; background:rgba(0,0,0,0.55); padding:20px; min-height:140px; color:#e8f6f6; font-size:20px; line-height:1.7; box-shadow: inset 0 0 20px rgba(0,0,0,0.8);`;
+        panel.appendChild(head);
+        panel.appendChild(box);
+
+        const archive = document.createElement('div');
+        archive.style.cssText = 'margin-top:20px; color:#8aa; font-size:15px;';
+        archive.innerHTML = `<div style="color:${color}; letter-spacing:2px; margin-bottom:8px;">KORÁBBI ADÁSOK</div>`;
+        log.slice(0, -1).reverse().forEach(entry => {
+            const row = document.createElement('div');
+            row.style.cssText = 'border-left:3px solid #335; padding:6px 10px; margin-bottom:6px; background:rgba(255,255,255,0.03);';
+            row.innerHTML = `<span style="color:${color};">${entry.floor}. EMELET</span> — ${entry.text}`;
+            archive.appendChild(row);
+        });
+        if (log.length > 1) panel.appendChild(archive);
+
+        const token = (this.commsTypeToken = (this.commsTypeToken || 0) + 1);
+        const text = latest.text;
+        let index = 0;
+        const type = () => {
+            if (token !== this.commsTypeToken || !box.isConnected) return;
+            index = Math.min(text.length, index + 2);
+            box.textContent = text.slice(0, index) + (index < text.length ? '█' : '');
+            if (index < text.length) setTimeout(type, 28);
+        };
+        type();
+    }
+
+    reopenShop() {
+        this.openShop({ ...this.activeShopContext, silent: true });
     }
 
     flashMoneyError() {

@@ -2,12 +2,19 @@ import * as THREE from 'three';
 import EventBus from './EventBus.js';
 import { weapons, skills, OmniCorpDirectives } from './Database.js';
 import { playerStats, savePlayerStats } from './RuntimeState.js';
+import { getCampaignFloorInfo, getResearchHubStationAt, researchCommsLog } from './Campaign.js';
 
 export class GameManager {
     constructor() {
         this.gameState = 'LOADING'; // 'LOADING', 'MENU', 'PLAYING', 'PAUSED', 'GAMEOVER', 'SHOPPING'
         this.score = 0;
         this.currentWave = 1;
+        this.activeResearchFloor = null;
+        this.activeResearchStation = null;
+        this.isResearchHubActive = false;
+        this.researchFloorActive = false;
+        this.pendingResearchArrival = false;
+        this.researchVisitedFloor = 0;
         this.enemiesToSpawn = 5;
         this.pendingEnemySpawns = [];
         this.pendingAggressiveSpawns = 0;
@@ -30,6 +37,7 @@ export class GameManager {
         this.hasStartedAnyWave = false;
         this.lastWaveBonus = 0;
         this.pauseStartTime = 0;
+        this.pausedFromState = 'PLAYING';
 
         this.activeFreezeTimer = 0;
         this.freezeCooldown = 0;
@@ -98,11 +106,20 @@ export class GameManager {
         EventBus.on('TRY_BUY_HEAL', (data) => this.onTryBuyHeal(data));
         EventBus.on('TRY_BUY_ARMOR', (data) => this.onTryBuyArmor(data));
         EventBus.on('TRY_BUY_CLEAN', (data) => this.onTryBuyClean(data));
+        EventBus.on('TRY_BUY_NEXUS_PURGE', () => this.onTryBuyNexusPurge());
         EventBus.on('TRY_BUY_RESONATOR', (data) => this.onTryBuyResonator(data));
         EventBus.on('TRY_BUY_NEURAL', (data) => this.onTryBuyNeural(data));
         EventBus.on('REQUEST_SHOP_UPDATE', () => this.sendShopData());
         EventBus.on('CLEAR_SHOP_LOCK', () => { this.shopLockedForNextWave = false; });
         EventBus.on('CLOSE_SHOP', () => {
+            if (this.gameState === 'SHOPPING' && this.terminalSequence === 'hub-menu') {
+                this.terminalSequence = 'idle';
+                this.gameState = 'PLAYING';
+                this.isResearchHubActive = false;
+                this.activeResearchStation = null;
+                this.updateResearchHubProximity();
+                return;
+            }
             if (this.gameState !== 'SHOPPING' || !this.terminalReady || this.terminalSequence !== 'menu') return;
             this.beginTerminalExit();
         });
@@ -135,11 +152,19 @@ export class GameManager {
     onReturnToMainMenu() {
         this.gameState = 'MENU';
         this.terminalSequence = 'idle';
+        this.activeResearchFloor = null;
+        this.activeResearchStation = null;
+        this.isResearchHubActive = false;
         if (this.levelManager) this.levelManager.setPodDoorOpen(false);
+        this.researchFloorActive = false;
+        this.pendingResearchArrival = false;
+        this.researchVisitedFloor = 0;
+        EventBus.emit('RESEARCH_ROOMS_SET', { active: false });
         this.isWaveActive = false;
         this.terminalReady = false;
         this.setTerminalPromptVisible(false);
         EventBus.emit('TERMINAL_RESET');
+        EventBus.emit('CAMPAIGN_FLOOR_RESET');
         this.pendingEnemySpawns.length = 0;
         this.pendingAggressiveSpawns = 0;
         this.enemySpawnTimer = 0;
@@ -176,6 +201,13 @@ export class GameManager {
     onStartGame(data) {
         this.gameState = 'PLAYING';
         this.terminalSequence = 'idle';
+        this.activeResearchFloor = null;
+        this.activeResearchStation = null;
+        this.isResearchHubActive = false;
+        this.researchFloorActive = false;
+        this.pendingResearchArrival = false;
+        this.researchVisitedFloor = 0;
+        EventBus.emit('RESEARCH_ROOMS_SET', { active: false });
         if (this.levelManager) this.levelManager.setPodDoorOpen(false);
         this.currentWave = 1;
         this.hasStartedAnyWave = false;
@@ -191,6 +223,7 @@ export class GameManager {
         this.terminalReady = false;
         this.setTerminalPromptVisible(false);
         EventBus.emit('TERMINAL_RESET');
+        EventBus.emit('CAMPAIGN_FLOOR_RESET');
 
         // Gyári visszaállítás (Tiszta lap)
         for (let sKey in skills) {
@@ -238,6 +271,7 @@ export class GameManager {
 
     onPauseGame() {
         if (this.gameState === 'PLAYING') {
+            this.pausedFromState = this.gameState;
             this.gameState = 'PAUSED';
             this.pauseStartTime = performance.now() / 1000;
         }
@@ -245,7 +279,7 @@ export class GameManager {
 
     onResumeGame() {
         if (this.gameState === 'PAUSED') {
-            this.gameState = 'PLAYING';
+            this.gameState = this.pausedFromState;
             if (this.pauseStartTime > 0) {
                 this.totalPausedTime += (performance.now() / 1000) - this.pauseStartTime;
                 this.pauseStartTime = 0;
@@ -310,7 +344,12 @@ export class GameManager {
         }
 
         this.terminalReady = false;
+        this.activeResearchFloor = null;
+        this.activeResearchStation = null;
+        this.isResearchHubActive = false;
+        this.researchFloorActive = false;
         this.setTerminalPromptVisible(false);
+        this.setResearchHubPromptVisible(false);
         EventBus.emit('TERMINAL_RESET');
 
         if (!isFirstWave) {
@@ -318,8 +357,16 @@ export class GameManager {
             this.enemiesToSpawn += 2;
         }
 
+        const floorInfo = getCampaignFloorInfo(this.currentWave);
+        this.pendingResearchArrival = floorInfo.isResearchFloor && this.researchVisitedFloor !== this.currentWave;
         EventBus.emit('WAVE_CHANGED', this.currentWave);
-        EventBus.emit('WAVE_STARTING', { wave: this.currentWave });
+        EventBus.emit('WAVE_STARTING', {
+            wave: this.currentWave,
+            sector: floorInfo.sector.name,
+            isServerRoom: floorInfo.bossCount > 0 && !this.pendingResearchArrival,
+            bossCount: this.pendingResearchArrival ? 0 : floorInfo.bossCount
+        });
+        EventBus.emit('RESEARCH_ROOMS_SET', { active: this.pendingResearchArrival });
 
         // Zsilipkapuk bezárása a szintek közötti liftezés idejére
         EventBus.emit('CLOSE_AIRLOCK_GATES', { duration: 1.0 });
@@ -331,6 +378,18 @@ export class GameManager {
 
         EventBus.emit('START_ELEVATOR_MOVE');
         EventBus.emit('PLAY_SOUND', { id: 'elevatorMove' });
+    }
+
+    _startResearchFloor() {
+        this.pendingResearchArrival = false;
+        this.researchFloorActive = true;
+        this.researchVisitedFloor = this.currentWave;
+        this.activeResearchFloor = this.currentWave;
+        this.terminalReady = true;
+        this.gameState = 'PLAYING';
+        const floorInfo = getCampaignFloorInfo(this.currentWave);
+        EventBus.emit('RESEARCH_FLOOR_ENTERED', { floor: this.currentWave, sector: floorInfo.sector.name });
+        this.updateTerminalProximity();
     }
 
     _startWaveAction() {
@@ -362,9 +421,10 @@ export class GameManager {
         if (this.enemyManager) {
             this.pendingEnemySpawns.length = 0;
             this.pendingAggressiveSpawns = 0;
-            let bossSpawning = (this.currentWave % 5 === 0 && this.currentWave >= 5);
+            const floorInfo = getCampaignFloorInfo(this.currentWave);
+            const bossCount = floorInfo.bossCount || (this.currentWave % 5 === 0 && this.currentWave >= 5 ? 1 : 0);
             for (let i = 0; i < this.enemiesToSpawn; i++) {
-                let isBoss = (bossSpawning && i === 0);
+                let isBoss = i < bossCount;
                 this.pendingEnemySpawns.push({ isBoss, forceType: null });
                 this.pendingAggressiveSpawns++;
             }
@@ -460,23 +520,46 @@ export class GameManager {
         EventBus.emit('WAVE_COMPLETED', { wave: this.currentWave, bonus: this.lastWaveBonus });
         EventBus.emit('UI_UPDATE_NEEDED');
 
-        if (this.shopLockedForNextWave) {
-            this.shopLockedForNextWave = false;
-            this.startWaveCountdown(false);
+        const nextFloor = this.currentWave + 1;
+        const nextFloorInfo = nextFloor <= 100 ? getCampaignFloorInfo(nextFloor) : null;
+        const isResearchStop = !!(nextFloorInfo && nextFloorInfo.isResearchFloor);
+        this.activeResearchFloor = null;
+
+        if (this.currentWave >= 100) {
+            this.gameState = 'VICTORY';
+            this.terminalReady = false;
+            this.setTerminalPromptVisible(false);
+            EventBus.emit('STOP_ELEVATOR_MOVE');
+            EventBus.emit('CAMPAIGN_COMPLETED', {
+                floor: this.currentWave,
+                nodesDefeated: 3,
+                score: this.score
+            });
             return;
         }
 
         this.terminalReady = true;
         this.gameState = 'PLAYING';
-        EventBus.emit('TERMINAL_ACTIVATED', { wave: this.currentWave });
-        EventBus.emit('TERMINAL_AVAILABLE', { wave: this.currentWave });
+        EventBus.emit('TERMINAL_ACTIVATED', {
+            wave: this.currentWave,
+            researchFloor: null
+        });
+        EventBus.emit('TERMINAL_AVAILABLE', {
+            wave: this.currentWave,
+            researchFloor: isResearchStop ? nextFloor : null,
+            sector: nextFloorInfo ? nextFloorInfo.sector.name : null
+        });
         this.updateTerminalProximity();
     }
 
     setTerminalPromptVisible(visible) {
         if (this.terminalPromptVisible === visible) return;
         this.terminalPromptVisible = visible;
-        EventBus.emit('SHOW_INTERACT_PROMPT', { visible, type: 'terminal' });
+        EventBus.emit('SHOW_INTERACT_PROMPT', {
+            visible,
+            type: 'terminal',
+            researchFloor: null
+        });
     }
 
     updateTerminalProximity() {
@@ -504,6 +587,7 @@ export class GameManager {
     }
 
     tryActivateTerminal() {
+        if (this.researchFloorActive && this.gameState === 'PLAYING' && this.tryResearchHubInteraction()) return;
         if (!this.terminalReady || this.gameState !== 'PLAYING' || !this.player || !this.player.camera) return;
 
         const { x, z } = this.player.camera.position;
@@ -526,6 +610,54 @@ export class GameManager {
         this.player.playerVelX = 0;
         this.player.playerVelZ = 0;
         this.levelManager.setPodDoorOpen(true);
+    }
+
+    updateResearchHubProximity() {
+        if (!this.researchFloorActive || this.gameState !== 'PLAYING' || !this.player || !this.player.camera) {
+            this.setResearchHubPromptVisible(false);
+            return;
+        }
+        const station = getResearchHubStationAt(this.player.camera.position);
+        const stationId = station ? station.id : null;
+        if (stationId === this.activeResearchStation) return;
+        this.activeResearchStation = stationId;
+        this.setResearchHubPromptVisible(!!station, station);
+    }
+
+    setResearchHubPromptVisible(visible, station = null) {
+        EventBus.emit('SHOW_INTERACT_PROMPT', {
+            visible,
+            type: 'research',
+            station: station ? station.id : null,
+            label: station ? station.label : null
+        });
+    }
+
+    tryResearchHubInteraction() {
+        if (!this.player || !this.player.camera) return;
+        const station = getResearchHubStationAt(this.player.camera.position);
+        if (!station) return false;
+        EventBus.emit('CONSUME_INTERACTION');
+        this.setResearchHubPromptVisible(false);
+        this.activeResearchStation = null;
+
+        this.activeResearchStation = station.id;
+        this.isResearchHubActive = true;
+        this.gameState = 'SHOPPING';
+        this.terminalSequence = 'hub-menu';
+        EventBus.emit('OPEN_SHOP', {
+            terminal: true,
+            hub: true,
+            researchFloor: this.activeResearchFloor,
+            sector: getCampaignFloorInfo(this.activeResearchFloor).sector.name,
+            researchStation: station.id,
+            researchTab: station.id === 'augmentation' ? 'skills' : 'weapons',
+            commsLog: station.id === 'comms'
+                ? Object.keys(researchCommsLog).map(Number).filter(floor => floor <= this.activeResearchFloor)
+                    .map(floor => ({ floor, ...researchCommsLog[floor] }))
+                : null
+        });
+        return true;
     }
 
     beginTerminalExit() {
@@ -632,7 +764,12 @@ export class GameManager {
             this.gameState = 'PLAYING';
             this.player.playerVelX = 0;
             this.player.playerVelZ = 0;
-            this.startWaveCountdown(!this.hasStartedAnyWave);
+            if (this.researchFloorActive) {
+                const bossCount = getCampaignFloorInfo(this.currentWave).bossCount;
+                this.startWaveCountdown(bossCount > 0);
+            } else {
+                this.startWaveCountdown(!this.hasStartedAnyWave);
+            }
         }
     }
 
@@ -657,6 +794,7 @@ export class GameManager {
         if (this.gameState !== 'PLAYING') return;
 
         this.updateTerminalProximity();
+        this.updateResearchHubProximity();
 
         // Ipari felvonó és zsilipkapu szekvencia a szintek között
         if (this.isElevating) {
@@ -687,7 +825,8 @@ export class GameManager {
                 if (this.elevatorTimer >= 15.5) {
                     this.isElevating = false;
                     this.elevatorPhase = 'done';
-                    this._startWaveAction();
+                    if (this.pendingResearchArrival) this._startResearchFloor();
+                    else this._startWaveAction();
                 }
             }
         }
@@ -798,7 +937,9 @@ export class GameManager {
             sterilizationPuddleCount,
             needsAmmo: needsAmmo,
             playerStats: playerStats,
-            shopLockedForNextWave: this.shopLockedForNextWave || false
+            shopLockedForNextWave: this.shopLockedForNextWave || false,
+            hub: this.terminalSequence === 'hub-menu',
+            researchStation: this.activeResearchStation
         };
 
         EventBus.emit('SHOP_DATA_READY', payload);
@@ -934,7 +1075,8 @@ export class GameManager {
     }
 
     onTryBuyHeal(data) {
-        if (!data || !data.confirmed || this.gameState !== 'SHOPPING' || this.terminalSequence !== 'menu') return;
+        if (!data || !data.confirmed || this.gameState !== 'SHOPPING' ||
+            (this.terminalSequence !== 'menu' && this.terminalSequence !== 'hub-menu')) return;
 
         let maxHP = 100 + (skills.maxHealth ? skills.maxHealth.level * 20 : 0);
         let missingHP = this.player ? (maxHP - this.player.health) : 0;
@@ -1023,7 +1165,7 @@ export class GameManager {
                 inputManager.yaw = rotation.y;
                 inputManager.pitch = rotation.x;
             }
-            this.terminalSequence = 'menu';
+            this.terminalSequence = this.isResearchHubActive ? 'hub-menu' : 'menu';
             this.gameState = 'SHOPPING';
             EventBus.emit('HEALING_COMPLETED');
         }
@@ -1052,7 +1194,8 @@ export class GameManager {
     }
 
     onTryBuyClean(data) {
-        if (!data || !data.confirmed || this.gameState !== 'SHOPPING' || this.terminalSequence !== 'menu') return;
+        if (!data || !data.confirmed || this.gameState !== 'SHOPPING' ||
+            (this.terminalSequence !== 'menu' && this.terminalSequence !== 'hub-menu')) return;
 
         let puddlesCount = this.getSterilizablePuddleCount();
         let cost = puddlesCount * 10;
@@ -1067,6 +1210,24 @@ export class GameManager {
         EventBus.emit('PLAY_SOUND', { id: 'purchase' });
         EventBus.emit('PURCHASE_SUCCESS');
         this.beginSterilization(puddlesCount);
+        this.sendShopData();
+    }
+
+    onTryBuyNexusPurge() {
+        const cost = 2000;
+        const inAllowedShop = this.gameState === 'SHOPPING' &&
+            (this.terminalSequence === 'menu' || this.terminalSequence === 'hub-menu');
+        if (!inAllowedShop || !this.player || this.player.infection <= 0 || this.score < cost) {
+            EventBus.emit('PURCHASE_FAILED');
+            return;
+        }
+
+        this.score -= cost;
+        this.player.infection = 0;
+        EventBus.emit('INFECTION_CHANGED', { playerInfection: 0 });
+        EventBus.emit('PLAY_SOUND', { id: 'purchase' });
+        EventBus.emit('PURCHASE_SUCCESS');
+        EventBus.emit('SHOW_LOOT_POPUP', { text: 'NEXUS SYNC MEGTISZTVA', color: '#00ffff' });
         this.sendShopData();
     }
 
@@ -1120,7 +1281,7 @@ export class GameManager {
         } else if (elapsed < 8.5) {
             camera.quaternion.copy(this.terminalSterilizationSide);
             steamIntensity = 0.5 + 0.5 * ease((elapsed - 6.0) / 2.5);
-            if (!this.terminalSterilizationDoorsClosing) {
+            if (!this.isResearchHubActive && !this.researchFloorActive && !this.terminalSterilizationDoorsClosing) {
                 this.terminalSterilizationDoorsClosing = true;
                 this.levelManager.closeDoors(2.5);
             }
@@ -1162,7 +1323,7 @@ export class GameManager {
                 inputManager.yaw = rotation.y;
                 inputManager.pitch = rotation.x;
             }
-            this.terminalSequence = 'menu';
+            this.terminalSequence = this.isResearchHubActive ? 'hub-menu' : 'menu';
             this.gameState = 'SHOPPING';
             EventBus.emit('STERILIZATION_COMPLETED');
         }

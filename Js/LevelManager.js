@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
+import { getCampaignFloorInfo, researchHubStations } from './Campaign.js';
 
 class LevelManager {
     constructor() {
@@ -15,6 +16,17 @@ class LevelManager {
         this.elevatorSpeed = 0;
         this.targetElevatorSpeed = 0;
         this.wallTex = null;
+        this.floorMaterial = null;
+        this.shaftWallMaterial = null;
+        this.serverRoomGroup = null;
+        this.sectorDressingGroups = {};
+        this.sectorPropCollisions = {};
+        this.activeSectorPropCollisions = [];
+        this.researchHubGroup = null;
+        this.researchHubCollisions = [];
+        this.researchRoomLights = [];
+        this.isResearchHubVisible = false;
+        this.researchRoomsActive = false;
         this.lightBlinkTimer = 0;
         this.elevatorTransitTimer = 0;
 
@@ -65,6 +77,9 @@ class LevelManager {
         EventBus.on('TERMINAL_OPEN', () => this.setTerminalModelOpen(true));
         EventBus.on('TERMINAL_CLOSE', () => this.setTerminalModelOpen(false));
         EventBus.on('STERILIZATION_STEAM', (intensity) => this.setSterilizationSteam(intensity));
+        EventBus.on('WAVE_STARTED', (data) => this.setCampaignFloor(data.wave));
+        EventBus.on('CAMPAIGN_FLOOR_RESET', () => this.setCampaignFloor(1));
+        EventBus.on('RESEARCH_ROOMS_SET', (data) => this.setResearchRoomsActive(!!(data && data.active)));
         });
     }
 
@@ -114,6 +129,8 @@ class LevelManager {
         // Anyagok
         const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, metalness: 0.1 });
         const shaftWallMat = new THREE.MeshStandardMaterial({ map: this.wallTex, roughness: 0.8, metalness: 0.2 });
+        this.floorMaterial = floorMat;
+        this.shaftWallMaterial = shaftWallMat;
         const portalFrameMat = new THREE.MeshStandardMaterial({ color: 0x272d36, roughness: 0.4, metalness: 0.8 });
         const blastDoorMat = new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 0.35, metalness: 0.85 });
         const doorRibMat = new THREE.MeshStandardMaterial({ color: 0x111317, roughness: 0.4, metalness: 0.9 });
@@ -178,6 +195,11 @@ class LevelManager {
         const mainFloor = new THREE.Mesh(new THREE.PlaneGeometry(arenaSize, arenaSize), floorMat);
         mainFloor.rotation.x = -Math.PI / 2;
         this.scene.add(mainFloor);
+
+        this.createServerRoomSet();
+        this.createSectorDressing();
+        this.createResearchHub(assetManager);
+        this.setCampaignFloor(1);
 
         // Ipari acél szegély a lift peremén
         const borderGeoX = new THREE.BoxGeometry(arenaSize, 0.15, 0.4);
@@ -439,6 +461,9 @@ class LevelManager {
             const gateLight = { light: pLight, rangeSq: 64, distanceSq: Infinity, tier: null };
             this.dynamicLightCandidates.push(gateLight);
 
+            const corridorChildStart = this.gatesGroup.children.length;
+            const corridorHitboxStart = this.wallHitboxes.length;
+
             // D) ZSILIP ALAGÚT A FAL MÖGÖTT
             const corridorMidZ = isXAxis ? doorCenterZ + dirSign * (wallThick / 2 + corridorDepth / 2) : doorCenterZ;
             const corridorMidX = isXAxis ? doorCenterX : doorCenterX + dirSign * (wallThick / 2 + corridorDepth / 2);
@@ -531,6 +556,9 @@ class LevelManager {
             const corridorLight = { light: lamp, rangeSq: 256, distanceSq: Infinity, tier: null };
             this.dynamicLightCandidates.push(corridorLight);
 
+            const corridorParts = this.gatesGroup.children.slice(corridorChildStart);
+            const corridorHitboxes = this.wallHitboxes.slice(corridorHitboxStart);
+
             // Ellenségek belépési / spawn pontja az alagút mélyén
             const spawnX = isXAxis ? doorCenterX : doorCenterX + dirSign * (wallThick / 2 + corridorDepth - 2.0);
             const spawnZ = isXAxis ? doorCenterZ + dirSign * (wallThick / 2 + corridorDepth - 2.0) : doorCenterZ;
@@ -554,7 +582,12 @@ class LevelManager {
                 isXAxis: isXAxis,
                 doorCenterX: doorCenterX,
                 doorCenterZ: doorCenterZ,
-                dirSign: dirSign
+                dirSign: dirSign,
+                corridorParts,
+                corridorHitboxes,
+                corridorHitboxBackups: corridorHitboxes.map(box => box.clone()),
+                corridorLight,
+                isResearchDoor: isXAxis ? doorCenterX === 0 : doorCenterZ === 0
             };
 
             this.doors.push(doorObj);
@@ -781,6 +814,267 @@ class LevelManager {
         }
     }
 
+    createServerRoomSet() {
+        this.serverRoomGroup = new THREE.Group();
+        this.serverRoomGroup.visible = false;
+        const frameMaterial = new THREE.MeshStandardMaterial({
+            color: 0x101820,
+            metalness: 0.85,
+            roughness: 0.35,
+            emissive: 0x04131c,
+            emissiveIntensity: 0.6
+        });
+        const coreMaterial = new THREE.MeshStandardMaterial({
+            color: 0x1b2530,
+            metalness: 0.7,
+            roughness: 0.2,
+            emissive: 0x00aabb,
+            emissiveIntensity: 2
+        });
+        const lightMaterial = new THREE.MeshBasicMaterial({ color: 0x00f5ff });
+
+        for (let index = 0; index < 3; index++) {
+            const x = (index - 1) * 5;
+            const rack = new THREE.Mesh(new THREE.BoxGeometry(2.4, 4.4, 1.25), frameMaterial);
+            rack.position.set(x, 2.2, -17);
+            this.serverRoomGroup.add(rack);
+
+            const core = new THREE.Mesh(new THREE.BoxGeometry(0.7, 3.5, 0.16), coreMaterial);
+            core.position.set(x, 2.25, -16.32);
+            this.serverRoomGroup.add(core);
+
+            const status = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 0.08), lightMaterial);
+            status.position.set(x, 4.45, -16.28);
+            this.serverRoomGroup.add(status);
+        }
+
+        const centralCore = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.6, 0.9, 5.2, 8),
+            new THREE.MeshStandardMaterial({
+                color: 0x18232c,
+                metalness: 0.8,
+                roughness: 0.25,
+                emissive: 0x00d8e8,
+                emissiveIntensity: 1.8
+            })
+        );
+        centralCore.position.set(0, 2.6, -21);
+        this.serverRoomGroup.add(centralCore);
+
+        const coreLight = new THREE.PointLight(0x00d8e8, 3.5, 22, 2);
+        coreLight.position.set(0, 3, -19);
+        this.serverRoomGroup.add(coreLight);
+        this.scene.add(this.serverRoomGroup);
+    }
+
+    createSectorDressing() {
+        const beta = new THREE.Group();
+        beta.visible = false;
+        const containerMaterial = new THREE.MeshStandardMaterial({
+            color: 0x66503a,
+            metalness: 0.65,
+            roughness: 0.82
+        });
+        const containerTrim = new THREE.MeshStandardMaterial({
+            color: 0xff9b32,
+            metalness: 0.45,
+            roughness: 0.55,
+            emissive: 0x4a1d00,
+            emissiveIntensity: 0.55
+        });
+        const betaCollisions = [];
+        for (const x of [-13, 13]) {
+            const container = new THREE.Mesh(new THREE.BoxGeometry(3.8, 2.8, 6.5), containerMaterial);
+            container.position.set(x, 1.4, -3);
+            beta.add(container);
+            const ribs = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.14, 6.6), containerTrim);
+            ribs.position.set(x, 2.72, -3);
+            beta.add(ribs);
+            betaCollisions.push(new THREE.Box3().setFromObject(container));
+        }
+        this.sectorDressingGroups.beta = beta;
+        this.sectorPropCollisions.beta = betaCollisions;
+        this.scene.add(beta);
+
+        const omega = new THREE.Group();
+        omega.visible = false;
+        const omegaCollisions = [];
+        const fleshMaterial = new THREE.MeshStandardMaterial({
+            color: 0x45151e,
+            metalness: 0.08,
+            roughness: 0.82,
+            emissive: 0x6b101c,
+            emissiveIntensity: 0.85
+        });
+        const growthGeometry = new THREE.ConeGeometry(1.05, 4.6, 7);
+        for (const [x, z, rotation] of [
+            [-20, -18, -0.18], [20, -18, 0.2], [-20, 18, 0.2], [20, 18, -0.2]
+        ]) {
+            const growth = new THREE.Mesh(growthGeometry, fleshMaterial);
+            growth.position.set(x, 2.25, z);
+            growth.rotation.z = rotation;
+            omega.add(growth);
+            omegaCollisions.push(new THREE.Box3().setFromObject(growth));
+        }
+        this.sectorDressingGroups.omega = omega;
+        this.sectorPropCollisions.omega = omegaCollisions;
+        this.scene.add(omega);
+    }
+
+    createResearchHub(assetManager) {
+        const wallHeight = 6;
+        const wallThickness = 0.4;
+        const roomHalfWidth = 7;
+        const roomStart = 26;
+        const roomEnd = 42;
+        const roomDepth = roomEnd - roomStart;
+        const roomCenter = (roomStart + roomEnd) / 2;
+        const floorMaterial = new THREE.MeshStandardMaterial({ color: 0xcfd8dc, metalness: 0.25, roughness: 0.6, emissive: 0x2a3338, emissiveIntensity: 0.6 });
+        const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xe6eef1, metalness: 0.2, roughness: 0.55, emissive: 0x2c363a, emissiveIntensity: 0.55 });
+        const panelMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const consoleMaterial = new THREE.MeshStandardMaterial({ color: 0x3a4850, metalness: 0.6, roughness: 0.35 });
+
+        const group = new THREE.Group();
+        group.visible = false;
+        this.researchHubGroup = group;
+        this.researchHubCollisions = [];
+        this.researchRoomLights = [];
+        this.scene.add(group);
+
+        const rotations = { armory: 0, regeneration: Math.PI, comms: Math.PI / 2, augmentation: -Math.PI / 2 };
+        const blocking = [];
+
+        for (const station of researchHubStations) {
+            const room = new THREE.Group();
+            room.rotation.y = rotations[station.id];
+            group.add(room);
+            const add = (geometry, material, x, y, z, blocks = false) => {
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(x, y, z);
+                room.add(mesh);
+                if (blocks) blocking.push(mesh);
+                return mesh;
+            };
+            const color = new THREE.Color(station.color);
+
+            add(new THREE.BoxGeometry(roomHalfWidth * 2, 0.2, roomDepth), floorMaterial, 0, 0.02, -roomCenter);
+            add(new THREE.BoxGeometry(roomHalfWidth * 2 + wallThickness * 2, 0.3, roomDepth), wallMaterial, 0, wallHeight, -roomCenter);
+            add(new THREE.BoxGeometry(wallThickness, wallHeight, roomDepth), wallMaterial, -roomHalfWidth - wallThickness / 2, wallHeight / 2, -roomCenter, true);
+            add(new THREE.BoxGeometry(wallThickness, wallHeight, roomDepth), wallMaterial, roomHalfWidth + wallThickness / 2, wallHeight / 2, -roomCenter, true);
+            add(new THREE.BoxGeometry(roomHalfWidth * 2 + wallThickness * 2, wallHeight, wallThickness), wallMaterial, 0, wallHeight / 2, -roomEnd - wallThickness / 2, true);
+
+            for (const z of [-roomStart - 4, -roomStart - 11]) {
+                add(new THREE.BoxGeometry(5, 0.08, 1.2), panelMaterial, 0, wallHeight - 0.2, z);
+            }
+            const stripMaterial = new THREE.MeshBasicMaterial({ color });
+            add(new THREE.BoxGeometry(0.15, 0.04, roomDepth - 1), stripMaterial, -roomHalfWidth + 0.8, 0.14, -roomCenter);
+            add(new THREE.BoxGeometry(0.15, 0.04, roomDepth - 1), stripMaterial, roomHalfWidth - 0.8, 0.14, -roomCenter);
+
+            const consoleZ = -roomEnd + 1.3;
+            const consoleBase = add(new THREE.BoxGeometry(2.2, 1.6, 1.2), consoleMaterial, 0, 0.8, consoleZ, true);
+            const terminalModel = assetManager && typeof assetManager.cloneModel === 'function' ? assetManager.cloneModel('terminal') : null;
+            if (terminalModel) {
+                consoleBase.visible = false;
+                const model = terminalModel.mesh;
+                room.add(model);
+                model.updateMatrixWorld(true);
+                const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+                const scale = 2.4 / Math.max(size.y, 0.001);
+                model.scale.multiplyScalar(scale);
+                model.position.set(0, 0, consoleZ);
+                room.updateMatrixWorld(true);
+                const fitted = new THREE.Box3().setFromObject(model);
+                const center = fitted.getCenter(new THREE.Vector3());
+                room.worldToLocal(center);
+                model.position.x -= center.x;
+                model.position.y -= new THREE.Box3().setFromObject(model).min.y;
+            } else {
+                consoleBase.visible = true;
+                const screen = add(new THREE.BoxGeometry(2.6, 1.2, 0.12), new THREE.MeshBasicMaterial({ color }), 0, 1.7, consoleZ - 0.25);
+                screen.rotation.x = -0.25;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 128;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#0b1418';
+            context.fillRect(0, 0, 512, 128);
+            context.strokeStyle = `#${station.color.toString(16).padStart(6, '0')}`;
+            context.lineWidth = 8;
+            context.strokeRect(4, 4, 504, 120);
+            context.fillStyle = '#e8f6f6';
+            context.font = 'bold 40px monospace';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(station.label, 256, 64);
+            add(new THREE.PlaneGeometry(5.5, 1.35), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), toneMapped: false }), 0, 4.4, -roomEnd - 0.03);
+
+            for (const depth of [roomStart + 4, roomStart + 12]) {
+                const light = new THREE.PointLight(0xf2fbff, 0, 24, 1.6);
+                const world = new THREE.Vector3(0, wallHeight - 0.7, -depth).applyAxisAngle(new THREE.Vector3(0, 1, 0), rotations[station.id]);
+                light.position.copy(world);
+                this.scene.add(light);
+                this.researchRoomLights.push(light);
+            }
+        }
+
+        group.updateMatrixWorld(true);
+        for (const mesh of blocking) this.researchHubCollisions.push(new THREE.Box3().setFromObject(mesh));
+    }
+
+    setResearchRoomsActive(isActive) {
+        if (this.researchRoomsActive === isActive) return;
+        this.researchRoomsActive = isActive;
+        this.isResearchHubVisible = isActive;
+        for (const door of this.doors) {
+            if (!door.isResearchDoor) continue;
+            for (const part of door.corridorParts) part.visible = !isActive;
+            door.corridorLight.disabled = isActive;
+            door.corridorHitboxes.forEach((box, index) => {
+                if (isActive) box.makeEmpty();
+                else box.copy(door.corridorHitboxBackups[index]);
+            });
+        }
+        this.syncResearchRoomVisibility();
+    }
+
+    syncResearchRoomVisibility() {
+        const visible = this.researchRoomsActive && !!this.gatesGroup && this.gatesGroup.visible;
+        if (this.researchHubGroup) this.researchHubGroup.visible = visible;
+        this.isResearchHubVisible = visible;
+        for (const light of this.researchRoomLights) light.intensity = visible ? 2.4 : 0;
+    }
+
+    setCampaignFloor(floor) {
+        const info = getCampaignFloorInfo(floor);
+        const floorTint = info.sector.id === 'alpha' ? 0xd4e2da : info.sector.id === 'beta' ? 0xb99a70 : 0xffffff;
+        const wallTint = info.sector.id === 'alpha' ? 0xc8e2d8 : info.sector.id === 'beta' ? 0xd19a58 : 0xffffff;
+        if (this.floorMaterial) this.floorMaterial.color.setHex(floorTint);
+        if (this.shaftWallMaterial) this.shaftWallMaterial.color.setHex(wallTint);
+        for (const [sectorId, group] of Object.entries(this.sectorDressingGroups)) {
+            group.visible = sectorId === info.sector.id;
+        }
+        this.activeSectorPropCollisions = this.sectorPropCollisions[info.sector.id] || [];
+        if (this.serverRoomGroup) {
+            this.serverRoomGroup.visible = info.bossCount > 0;
+            this.serverRoomGroup.traverse((object) => {
+                if (object.isPointLight) {
+                    object.color.setHex(info.sector.color);
+                } else if (object.material && object.material.emissive) {
+                    object.material.emissive.setHex(info.sector.color);
+                } else if (object.material && object.material.isMeshBasicMaterial) {
+                    object.material.color.setHex(info.sector.color);
+                }
+            });
+        }
+        for (const { mesh, light } of this.warningLights) {
+            if (mesh.material) mesh.material.color.setHex(info.sector.color);
+            if (light) light.color.setHex(info.sector.color);
+        }
+        if (this.shaftLensMat) this.shaftLensMat.color.setHex(info.sector.color);
+    }
+
     setTerminalModelOpen(isOpen) {
         this.terminalModelTargetTime = isOpen ? 0 : 2.7;
     }
@@ -917,6 +1211,7 @@ class LevelManager {
         }
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
+            if (this.researchRoomsActive && !d.isResearchDoor) continue;
             d.targetProgress = 1.0;
             d.duration = duration;
             if (d.lightMesh && d.lightMesh.material) {
@@ -926,7 +1221,8 @@ class LevelManager {
                 d.pointLight.color.setHex(0x00ff66);
             }
         }
-        EventBus.emit('GATES_SMOKE_BURST', { gates: this.getGatePouringPositions() });
+        this.syncResearchRoomVisibility();
+        if (!this.researchRoomsActive) EventBus.emit('GATES_SMOKE_BURST', { gates: this.getGatePouringPositions() });
     }
 
     closeDoors(duration = 1.5) {
@@ -972,7 +1268,7 @@ class LevelManager {
                 const dy = cameraPosition.y - this.lightBounds.center.y;
                 const dz = cameraPosition.z - this.lightBounds.center.z;
                 candidate.distanceSq = dx * dx + dy * dy + dz * dz;
-            } else if (this.gatesGroup.visible) {
+            } else if (this.gatesGroup.visible && !candidate.disabled) {
                 const position = candidate.light.position;
                 const dx = cameraPosition.x - position.x;
                 const dy = cameraPosition.y - position.y;
@@ -1039,6 +1335,7 @@ class LevelManager {
                 this.gatesGroup.visible = false;
             }
         }
+        this.syncResearchRoomVisibility();
 
         // 1. Környezeti textúra léptetés: A lift LEFELÉ halad, ezért a fal textúrája FELFELE halad
         // Szigorú matematikai szinkronizáció a felfelé suhanó aknalámpákkal!
@@ -1157,7 +1454,7 @@ class LevelManager {
         }
 
         // 5. Zsilipkapuk sűrű zöld füstjének kifele ömlése a platform padlójára
-        if (this.isDoorsOpen && this.sterilizationSteamIntensity === 0) {
+        if (this.isDoorsOpen && !this.researchRoomsActive && this.sterilizationSteamIntensity === 0) {
             this.smokeTickTimer = (this.smokeTickTimer || 0) + delta;
             if (this.smokeTickTimer >= 0.10) {
                 this.smokeTickTimer = 0;
@@ -1190,6 +1487,14 @@ class LevelManager {
         const maxZ = z + r;
         for (let i = 0; i < this.wallHitboxes.length; i++) {
             if (this.collisionBoxOverlapsAabb(this.wallHitboxes[i], minX, maxX, minZ, maxZ)) return true;
+        }
+        for (let i = 0; i < this.activeSectorPropCollisions.length; i++) {
+            if (this.collisionBoxOverlapsAabb(this.activeSectorPropCollisions[i], minX, maxX, minZ, maxZ)) return true;
+        }
+        if (this.isResearchHubVisible) {
+            for (let i = 0; i < this.researchHubCollisions.length; i++) {
+                if (this.collisionBoxOverlapsAabb(this.researchHubCollisions[i], minX, maxX, minZ, maxZ)) return true;
+            }
         }
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
