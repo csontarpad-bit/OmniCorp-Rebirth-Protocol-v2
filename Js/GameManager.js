@@ -15,6 +15,7 @@ export class GameManager {
         this.researchFloorActive = false;
         this.pendingResearchArrival = false;
         this.researchVisitedFloor = 0;
+        this.pendingTargetFloor = null;
         this.enemiesToSpawn = 5;
         this.pendingEnemySpawns = [];
         this.pendingAggressiveSpawns = 0;
@@ -137,6 +138,14 @@ export class GameManager {
             EventBus.emit('WAVE_CHANGED', wave);
             EventBus.emit('UI_UPDATE_NEEDED');
         });
+        EventBus.on('DEV_SET_FLOOR', (floor) => {
+            if (!Number.isInteger(floor) || floor < 1 || floor > 100) {
+                EventBus.emit('DEV_FLOOR_TARGET_FAILED');
+                return;
+            }
+            this.pendingTargetFloor = floor;
+            EventBus.emit('DEV_FLOOR_TARGET_SET', { floor });
+        });
         EventBus.on('DEV_SET_GOD_MODE', (isGod) => {
             this.isGodMode = isGod;
             EventBus.emit('SET_GOD_MODE', isGod);
@@ -159,6 +168,7 @@ export class GameManager {
         this.researchFloorActive = false;
         this.pendingResearchArrival = false;
         this.researchVisitedFloor = 0;
+        this.pendingTargetFloor = null;
         EventBus.emit('RESEARCH_ROOMS_SET', { active: false });
         this.isWaveActive = false;
         this.terminalReady = false;
@@ -207,6 +217,7 @@ export class GameManager {
         this.researchFloorActive = false;
         this.pendingResearchArrival = false;
         this.researchVisitedFloor = 0;
+        this.pendingTargetFloor = null;
         EventBus.emit('RESEARCH_ROOMS_SET', { active: false });
         if (this.levelManager) this.levelManager.setPodDoorOpen(false);
         this.currentWave = 1;
@@ -352,7 +363,10 @@ export class GameManager {
         this.setResearchHubPromptVisible(false);
         EventBus.emit('TERMINAL_RESET');
 
-        if (!isFirstWave) {
+        if (this.pendingTargetFloor !== null) {
+            this.currentWave = this.pendingTargetFloor;
+            this.pendingTargetFloor = null;
+        } else if (!isFirstWave) {
             this.currentWave++;
             this.enemiesToSpawn += 2;
         }

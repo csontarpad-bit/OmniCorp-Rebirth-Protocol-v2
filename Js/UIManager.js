@@ -17,6 +17,7 @@ class UIManager {
         this.isModelsLoaded = false;
         this.waveBriefingInterval = null;
         this.waveBriefingTimeout = null;
+        this.commsConversations = new Map();
 
         // Globális függvények az inline onclick eseményekhez
         this.loreAudio = null;
@@ -70,6 +71,9 @@ class UIManager {
         EventBus.on('SHOW_LOOT_POPUP', (data) => this.showLootPopup(data));
         EventBus.on('SHOW_INTERACT_PROMPT', (data) => this.showInteractPrompt(data));
         EventBus.on('OPEN_SHOP', (data) => this.openShop(data || {}));
+        EventBus.on('START_GAME', () => this.commsConversations.clear());
+        EventBus.on('DEV_FLOOR_TARGET_SET', ({ floor }) => this.updateDevFloorStatus(`${floor}. EMELET BEÁLLÍTVA A KÖVETKEZŐ LIFTÚTHOZ.`));
+        EventBus.on('DEV_FLOOR_TARGET_FAILED', () => this.updateDevFloorStatus('ÉRVÉNYTELEN SZINT. 1 ÉS 100 KÖZÖTTI EGÉSZ SZÁMOT ADJ MEG.'));
         EventBus.on('STERILIZATION_CONFIRMATION_REQUEST', (data) => this.showSterilizationConfirmation(data));
         EventBus.on('STERILIZATION_STARTED', () => {
             if (this.shopMenu) this.shopMenu.classList.add('hidden');
@@ -739,6 +743,9 @@ class UIManager {
         const devWave = document.getElementById('dev-wave-99');
         const devUnlock = document.getElementById('dev-unlock-all');
         const devGod = document.getElementById('dev-god-mode');
+        const devFloorInput = document.getElementById('dev-floor-input');
+        const devFloorButton = document.getElementById('dev-set-floor');
+        const devFloorStatus = document.getElementById('dev-floor-status');
 
         if (devClose && devMenu) {
             devClose.addEventListener('click', () => {
@@ -749,6 +756,17 @@ class UIManager {
                 if (isPlaying) {
                     this.requestSafePointerLock();
                 }
+            });
+        }
+
+        if (devFloorButton && devFloorInput && devFloorStatus) {
+            devFloorButton.addEventListener('click', () => {
+                const floor = Number(devFloorInput.value);
+                if (!Number.isInteger(floor) || floor < 1 || floor > 100) {
+                    devFloorStatus.textContent = 'ÉRVÉNYTELEN SZINT. 1 ÉS 100 KÖZÖTTI EGÉSZ SZÁMOT ADJ MEG.';
+                    return;
+                }
+                EventBus.emit('DEV_SET_FLOOR', floor);
             });
         }
 
@@ -800,6 +818,11 @@ class UIManager {
                 devGod.style.borderColor = isGodMode ? "#00ffff" : "#aa0000";
             });
         }
+    }
+
+    updateDevFloorStatus(message) {
+        const status = document.getElementById('dev-floor-status');
+        if (status) status.textContent = message;
     }
 
     updateHUD(data) {
@@ -1366,9 +1389,9 @@ class UIManager {
 
     get researchStationThemes() {
         return {
-            armory: { title: 'FEGYVERÉSZET', color: '#ffb347', sub: 'IPARI MOLEKULÁRIS KOHÓ // FEGYVER- ÉS LŐSZERGYÁRTÁS', buttons: ['buy-pistol', 'buy-shotgun', 'buy-rifle', 'buy-super', 'buy-ammo', 'buy-resonator'] },
+            armory: { title: 'FEGYVERÉSZET', color: '#ffb347', sub: 'IPARI MOLEKULÁRIS KOHÓ // FEGYVERKALIBRÁLÁS ÉS REZONÁTOR', buttons: ['buy-pistol', 'buy-shotgun', 'buy-rifle', 'buy-super', 'buy-resonator'] },
             augmentation: { title: 'MODIFIKÁCIÓ', color: '#00d9ff', sub: 'AUTO-DOKTOR // IMPLANTÁTUMOK ÉS NEURÁLIS FEJLESZTÉS', buttons: [] },
-            regeneration: { title: 'REGENERÁCIÓ', color: '#49bfff', sub: 'DIALÍZIS KAMRA // NEXUS SYNC TISZTÍTÁS ÉS GYÓGYÁSZAT', buttons: ['buy-infection-clean', 'buy-health', 'buy-medkit', 'buy-armor', 'buy-clean'] },
+            regeneration: { title: 'REGENERÁCIÓ', color: '#49bfff', sub: 'DIALÍZIS KAMRA // NEXUS SYNC TISZTÍTÁS ÉS GEN-STAB KÉSZLET', buttons: ['buy-infection-clean', 'buy-medkit'] },
             comms: { title: 'KOMMUNIKÁCIÓ', color: '#ff4f70', sub: 'ÓLOMFALAS RÁDIÓSZOBA // BIZTONSÁGOS CSATORNA', buttons: [] }
         };
     }
@@ -1449,43 +1472,105 @@ class UIManager {
 
     renderCommsPanel(panel, data, theme) {
         const log = data.commsLog || [];
-        const latest = log[log.length - 1];
+        const floor = data.researchFloor;
         panel.style.display = 'block';
         panel.innerHTML = '';
-        if (!latest) {
-            panel.innerHTML = '<div style="color:#888; text-align:center; margin-top:40px;">NINCS BEJÖVŐ ADÁS</div>';
-            return;
-        }
         const color = theme.color;
-        const head = document.createElement('div');
-        head.style.cssText = `display:flex; justify-content:space-between; font-size:16px; color:${color}; margin-bottom:10px; letter-spacing:2px;`;
-        head.innerHTML = `<span>● ADÁS: G. GALLAGHER</span><span>JEL: ${latest.signal}</span>`;
-        const box = document.createElement('div');
-        box.style.cssText = `border:1px solid ${color}; background:rgba(0,0,0,0.55); padding:20px; min-height:140px; color:#e8f6f6; font-size:20px; line-height:1.7; box-shadow: inset 0 0 20px rgba(0,0,0,0.8);`;
-        panel.appendChild(head);
-        panel.appendChild(box);
-
-        const archive = document.createElement('div');
-        archive.style.cssText = 'margin-top:20px; color:#8aa; font-size:15px;';
-        archive.innerHTML = `<div style="color:${color}; letter-spacing:2px; margin-bottom:8px;">KORÁBBI ADÁSOK</div>`;
-        log.slice(0, -1).reverse().forEach(entry => {
+        const archive = document.createElement('section');
+        archive.style.cssText = 'margin-bottom:18px; color:#8aa;';
+        const archiveTitle = document.createElement('div');
+        archiveTitle.textContent = 'KUTATÁSI ADÁSOK // ARCHÍVUM';
+        archiveTitle.style.cssText = `color:${color}; letter-spacing:2px; margin-bottom:8px;`;
+        archive.appendChild(archiveTitle);
+        log.forEach(entry => {
             const row = document.createElement('div');
-            row.style.cssText = 'border-left:3px solid #335; padding:6px 10px; margin-bottom:6px; background:rgba(255,255,255,0.03);';
-            row.innerHTML = `<span style="color:${color};">${entry.floor}. EMELET</span> — ${entry.text}`;
+            row.style.cssText = 'border-left:3px solid #533; padding:8px 10px; margin-bottom:7px; background:rgba(255,255,255,0.03);';
+            const label = document.createElement('div');
+            label.textContent = `${entry.floor}. EMELET // G. GALLAGHER // JEL: ${entry.signal}`;
+            label.style.cssText = `color:${color}; font-size:13px; letter-spacing:1px; margin-bottom:4px;`;
+            const message = document.createElement('div');
+            message.textContent = entry.text;
+            message.style.cssText = 'color:#d7e5e5; font-size:15px; line-height:1.5;';
+            row.append(label, message);
             archive.appendChild(row);
         });
-        if (log.length > 1) panel.appendChild(archive);
+        if (!log.length) {
+            const empty = document.createElement('div');
+            empty.textContent = 'NINCS KORÁBBI ADÁS A RENDSZERBEN.';
+            empty.style.color = '#888';
+            archive.appendChild(empty);
+        }
+        panel.appendChild(archive);
 
-        const token = (this.commsTypeToken = (this.commsTypeToken || 0) + 1);
-        const text = latest.text;
-        let index = 0;
-        const type = () => {
-            if (token !== this.commsTypeToken || !box.isConnected) return;
-            index = Math.min(text.length, index + 2);
-            box.textContent = text.slice(0, index) + (index < text.length ? '█' : '');
-            if (index < text.length) setTimeout(type, 28);
-        };
-        type();
+        const conversation = this.commsConversations.get(floor) || [];
+        this.commsConversations.set(floor, conversation);
+        const chat = document.createElement('section');
+        chat.style.cssText = `border:1px solid ${color}; background:rgba(0,0,0,0.55); padding:14px; box-shadow:inset 0 0 20px rgba(0,0,0,0.8);`;
+        const chatTitle = document.createElement('div');
+        chatTitle.textContent = `KÉTIRÁNYÚ KAPCSOLAT // G. GALLAGHER // ${floor}. EMELET`;
+        chatTitle.style.cssText = `color:${color}; letter-spacing:1px; margin-bottom:10px;`;
+        chat.appendChild(chatTitle);
+
+        const messages = document.createElement('div');
+        messages.className = 'comms-messages';
+        messages.style.cssText = 'max-height:180px; overflow-y:auto; margin-bottom:12px;';
+        conversation.forEach(entry => {
+            const message = document.createElement('div');
+            message.textContent = `${entry.speaker}: ${entry.text}`;
+            message.style.cssText = `color:${entry.speaker === 'ECHO' ? '#ffcc88' : '#e8f6f6'}; font-size:15px; line-height:1.5; padding:5px 0;`;
+            messages.appendChild(message);
+        });
+        if (!conversation.length) {
+            const prompt = document.createElement('div');
+            prompt.textContent = 'A vonal nyitva. Válassz egy kérdést Gallagherhez.';
+            prompt.style.cssText = 'color:#b8c8c8; font-size:15px; padding:5px 0 12px;';
+            messages.appendChild(prompt);
+        }
+        chat.appendChild(messages);
+
+        const questions = [
+            {
+                question: 'Mi vár rám a következő szinten?',
+                answer: () => {
+                    if (floor >= 100) return 'A Mag előtt állsz, ECHO. Nincs következő szint. Három Nexus Node választ el a KRONOS-tól.';
+                    const next = getCampaignFloorInfo(floor + 1);
+                    return next.bossCount
+                        ? `A ${next.floor}. szinten szerverterem vár ${next.bossCount} Nexus Node-dal. Töltsd fel a készleteidet a liftben.`
+                        : `A ${next.floor}. szint a ${next.sector.name} szektorban van. Figyeld a fertőzés jeleit, és tartsd készen a fegyvered.`;
+                }
+            },
+            {
+                question: 'Melyik terminált használjam?',
+                answer: () => 'A Fegyverészet a fegyvereidet és a rezonátort kezeli, a Modifikációs pult a fejlesztéseket, a Regenerációs Kamra a Gen-Stab készletet és a Nexus Syncet. Lőszert, Kevlárt, gyógyítást és pályasterilizálást a lift terminálján érsz el.'
+            },
+            {
+                question: 'Gallagher, hogy vagy? Mit látsz?',
+                answer: () => {
+                    const latest = log[log.length - 1];
+                    if (latest?.mood === 'glitch' || latest?.mood === 'tired') {
+                        return 'A vonal recseg... *köhögés* Még tartom a kapcsolatot, de a KRONOS egyre közelebb jut. Ne vesztegesd az időt, ECHO.';
+                    }
+                    return 'Hallak, ECHO. Egyelőre tiszta a csatorna. A kamerák képét figyelem, de csak a laborokban tudlak biztonságosan elérni.';
+                }
+            }
+        ];
+        const choices = document.createElement('div');
+        choices.style.cssText = 'display:grid; grid-template-columns:1fr; gap:7px;';
+        questions.forEach(({ question, answer }) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = `> ${question}`;
+            button.style.cssText = `background:rgba(70,0,20,0.45); color:#f4c8d0; border:1px solid ${color}; padding:9px 12px; text-align:left; cursor:pointer; font:inherit;`;
+            button.addEventListener('click', () => {
+                conversation.push({ speaker: 'ECHO', text: question }, { speaker: 'GALLAGHER', text: answer() });
+                this.renderCommsPanel(panel, data, theme);
+                const updatedMessages = panel.querySelector('.comms-messages');
+                if (updatedMessages) updatedMessages.scrollTop = updatedMessages.scrollHeight;
+            });
+            choices.appendChild(button);
+        });
+        chat.appendChild(choices);
+        panel.appendChild(chat);
     }
 
     reopenShop() {

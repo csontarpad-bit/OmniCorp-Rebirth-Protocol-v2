@@ -893,6 +893,18 @@
                     MODE: KI</button>
             </div>
 
+            <div style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed #006666;">
+                <label for="dev-floor-input" style="display: block; margin-bottom: 6px; font-size: 12px;">CÉL SZINT (1–100)</label>
+                <div style="display: flex; gap: 6px;">
+                    <input id="dev-floor-input" type="number" min="1" max="100" step="1" value="1"
+                        style="min-width: 0; flex: 1; background: rgba(0,0,0,0.65); color: #00ffff; border: 1px solid #00aaaa; padding: 7px; font-family: inherit;">
+                    <button id="dev-set-floor"
+                        style="background: rgba(0, 50, 50, 0.8); color: #00ffff; border: 1px solid #00aaaa; padding: 7px; cursor: pointer; font-family: inherit; font-size: 12px;">LIFT CÉLJA</button>
+                </div>
+                <div id="dev-floor-status" role="status" aria-live="polite"
+                    style="min-height: 14px; margin-top: 6px; color: #aaffaa; font-size: 11px;"></div>
+            </div>
+
             <button id="dev-close"
                 style="width: 100%; margin-top: 10px; background: #00ffff; color: #000; border: none; padding: 8px; font-weight: bold; cursor: pointer; font-family: inherit; font-size: 14px;">[X]
                 BEZÁRÁS</button>
