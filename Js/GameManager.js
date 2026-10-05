@@ -518,6 +518,7 @@ export class GameManager {
     beginTerminalEntry() {
         if (!this.levelManager || this.terminalSequence !== 'idle') return;
         EventBus.emit('CLEAR_CORPSES');
+        EventBus.emit('TERMINAL_OPEN');
         if (this.weaponSystem) this.weaponSystem.holsterForTerminal();
         this.gameState = 'TERMINAL_TRANSITION';
         this.terminalSequence = 'enter-opening';
@@ -529,6 +530,7 @@ export class GameManager {
 
     beginTerminalExit() {
         if (!this.levelManager || this.terminalSequence !== 'menu') return;
+        EventBus.emit('TERMINAL_CLOSE');
         this.gameState = 'TERMINAL_TRANSITION';
         this.terminalSequence = 'exit-opening';
         this.terminalSequenceTime = 0;

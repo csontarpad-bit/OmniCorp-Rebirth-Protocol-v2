@@ -38,8 +38,10 @@ class LevelManager {
         this.sterilizationWhite = new THREE.Color(0xffffff);
 
         this.regenerationPod = null;
-        this.podStatusScreen = null;
-        this.podStatusTexture = null;
+        this.terminalModelMixer = null;
+        this.terminalModelAction = null;
+        this.terminalModelTime = 2.7;
+        this.terminalModelTargetTime = 2.7;
         this.podPowerLight = null;
         this.podRotor = null;
         this.podAnimationTime = 0;
@@ -60,6 +62,8 @@ class LevelManager {
         EventBus.on('CLOSE_AIRLOCK_GATES', (data) => this.closeDoors(data ? data.duration : 1.5));
         EventBus.on('TERMINAL_SESSION_ACTIVE', () => this.setTerminalActive(true));
         EventBus.on('TERMINAL_RESET', () => this.setTerminalActive(false));
+        EventBus.on('TERMINAL_OPEN', () => this.setTerminalModelOpen(true));
+        EventBus.on('TERMINAL_CLOSE', () => this.setTerminalModelOpen(false));
         EventBus.on('STERILIZATION_STEAM', (intensity) => this.setSterilizationSteam(intensity));
         });
     }
@@ -371,7 +375,7 @@ class LevelManager {
             this.wallHitboxes.push(new THREE.Box3().setFromObject(pMesh));
         });
 
-        this.createRegenerationPod();
+        this.createRegenerationPod(assetManager);
 
         // --- 4. ZSILIPKAPU GYÁRTÓ SEGÉDFÜGGVÉNY (VIBRÁLÁS ÉS FEDÉSMENTES KIALAKÍTÁS) ---
         // A kapulap tisztán a falnyílás belsejében mozog, nincs közös lapja a falakkal, így zéró Z-fighting!
@@ -633,7 +637,7 @@ class LevelManager {
         console.log(`[KRONOS] LevelManager: Egységesített, folytonos -100. emeleti aknafalak (60m) és oszlopok kiépítve.`);
     }
 
-    createRegenerationPod() {
+    createRegenerationPod(assetManager) {
         const pod = new THREE.Group();
         pod.scale.set(3.2 / 9.8, 1, 3.2 / 9.8);
         const steel = new THREE.MeshStandardMaterial({ color: 0x252d32, metalness: 0.88, roughness: 0.3 });
@@ -718,21 +722,23 @@ class LevelManager {
         pod.add(rotor);
         this.podRotor = rotor;
 
-        this.podStatusTexture = new THREE.TextureLoader().load(
-            'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/77c84b40fe1dd0680dfd1262d700c45f3245c1f0/logo%20trans.png',
-            undefined,
-            undefined,
-            (error) => console.warn('[KRONOS] OmniCorp logó betöltése sikertelen:', error)
-        );
-        this.podStatusTexture.encoding = THREE.sRGBEncoding;
-        const screenMaterial = new THREE.MeshBasicMaterial({ map: this.podStatusTexture });
-        this.podStatusScreen = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 1.35), screenMaterial);
-        this.podStatusScreen.position.set(0, 1.8, -4.12);
-        pod.add(this.podStatusScreen);
-
-        const statusPanel = new THREE.Mesh(new THREE.BoxGeometry(2.9, 1.55, 0.08), steel);
-        statusPanel.position.set(0, 1.8, -4.26);
-        pod.add(statusPanel);
+        const terminalModel = assetManager.cloneModel('terminal');
+        if (!terminalModel) {
+            throw new Error('[KRONOS] The terminal model was not loaded before the regeneration pod was created.');
+        }
+        terminalModel.mesh.scale.set(9.8 / 3.2, 1, 2);
+        terminalModel.mesh.position.set(0, 0.26, -3.14);
+        pod.add(terminalModel.mesh);
+        if (terminalModel.animations.length > 0) {
+            this.terminalModelMixer = new THREE.AnimationMixer(terminalModel.mesh);
+            this.terminalModelAction = this.terminalModelMixer.clipAction(terminalModel.animations[0]);
+            this.terminalModelAction.play();
+            this.terminalModelAction.paused = true;
+            this.terminalModelAction.time = this.terminalModelTime;
+            this.terminalModelMixer.update(0);
+        } else {
+            console.warn('[KRONOS] The terminal model has no animation clips.');
+        }
 
         const entryFrame = new THREE.Group();
         [
@@ -762,10 +768,6 @@ class LevelManager {
 
     setTerminalActive(isActive) {
         this.isTerminalActive = isActive;
-        if (this.podStatusScreen) {
-            this.podStatusScreen.material.color.setHex(isActive ? 0xffffff : 0xb4b4b4);
-        }
-
         if (this.podEntryIndicator && this.podGlowMaterials) {
             this.podEntryIndicator.material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
         }
@@ -777,6 +779,10 @@ class LevelManager {
             this.podRotor.children[0].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
             this.podRotor.children[1].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
         }
+    }
+
+    setTerminalModelOpen(isOpen) {
+        this.terminalModelTargetTime = isOpen ? 0 : 2.7;
     }
 
     setPodDoorOpen(isOpen) {
@@ -986,6 +992,15 @@ class LevelManager {
     }
 
     update(delta) {
+        if (this.terminalModelAction && this.terminalModelMixer) {
+            const timeRemaining = this.terminalModelTargetTime - this.terminalModelTime;
+            if (Math.abs(timeRemaining) > 0.001) {
+                this.terminalModelTime += Math.sign(timeRemaining) * Math.min(delta, Math.abs(timeRemaining));
+                this.terminalModelAction.time = this.terminalModelTime;
+                this.terminalModelMixer.update(0);
+            }
+        }
+
         if (this.podDoorPanels.length) {
             this.podDoorProgress = THREE.MathUtils.damp(this.podDoorProgress, this.podDoorTarget, 5, delta);
             if (Math.abs(this.podDoorProgress - this.podDoorTarget) < 0.005) {

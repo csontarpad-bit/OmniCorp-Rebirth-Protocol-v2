@@ -181,6 +181,7 @@ class AssetManager {
         // --- 3D Modellek ---
         this.loadModel('plant', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/061e749b34c35aa535f6a41895cdeaebaa6f4d1c/flesh_bomb.glb');
         this.loadModel('resonator', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/fdec8a5bc1e3f9c22360ed369f686eddf256695f/3DModels/Seismic%20Resonator.glb');
+        this.loadModel('terminal', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/68b130270c0fe0ddec915a5929d2335a4d921643/3DModels/terminal.glb', 'critical');
         this.loadModel('zombie', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/main/zombie.glb', 'critical');
         this.loadModel('runner', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/0214d22fe4ca2284df78cbf1eb8f820834651f9a/runerv2.glb');
         this.loadModel('tank', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/7e6d7e06a66a6c9df5665f7df2a92cdfb14846d7/tankv2.glb');
