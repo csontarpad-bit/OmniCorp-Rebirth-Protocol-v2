@@ -120,6 +120,9 @@ class UIManager {
         EventBus.on('GATES_OPENING', () => {
             this.showWaveBriefing('ZSILIPKAPUK NYÍLNAK');
         });
+        EventBus.on('MAGLIFT_DEPARTING', () => {
+            this.showWaveBriefing('MAGLIFT INDUL — KRONOS BARLANG', 2500);
+        });
         EventBus.on('WAVE_STARTED', (data) => {
             const floorInfo = getCampaignFloorInfo(data.wave);
             if (floorInfo.isFinalGate) {
@@ -1603,7 +1606,7 @@ class UIManager {
         const status = document.createElement('div');
         status.style.cssText = `color:${color}; letter-spacing:2px; margin-bottom:14px; font-size:16px;`;
         status.textContent = data.nodeUnlocked
-            ? (data.isFinalGate ? 'ZÁR FELOLDVA — A KIJÁRATI KAPU NYITVA. A FOLYOSÓ AZ EGYSZEMÉLYES MAGLIFTHEZ VEZET.' : 'ZÁR FELOLDVA — A KIJÁRATI KAPU NYITVA. A FOLYOSÓ A KÖVETKEZŐ SZEKTOR PÁLYALIFTJÉHEZ VEZET.')
+            ? (data.isFinalGate ? 'ZÁR FELOLDVA — A KIJÁRAT NYITVA. LÉPJ BE A MAGLIFT KABINJÁBA; AZ AJTÓ MAGÁTÓL ZÁRÓDIK, ÉS ELINDUL A BARLANGBA.' : 'ZÁR FELOLDVA — A KIJÁRATI KAPU NYITVA. A FOLYOSÓ A KÖVETKEZŐ SZEKTOR PÁLYALIFTJÉHEZ VEZET.')
             : `${data.sector} SZEKTORZÁR AKTÍV — A NEXUS NODE VÉDELME LEKAPCSOLVA.`;
         panel.appendChild(status);
         const button = document.createElement('button');
@@ -1815,7 +1818,7 @@ class UIManager {
                 answer: () => {
                     if (floor >= 102) return 'A Mag előtt állsz, ECHO. Nincs következő szint.';
                     const next = getCampaignFloorInfo(floor + 1);
-                    if (next.isCaveFloor) return 'A Mag barlangja külön helyiség: a 101. szint szerverterme mögötti kis szobában az egyszemélyes lift visz le. Három Nexus Node vár odalent.';
+                    if (next.isCaveFloor) return 'A Mag barlangja külön helyiség. A 101. szinten győzd le Gallaghert, oldd fel a kijárati zárat, majd lépj be a kis szobában álló Maglift-kabinba. Ha teljesen beszálltál, az ajtó automatikusan záródik és a lift levisz a barlangba; nem kell terminált használnod vagy kilépned a kabinból.';
                     if (next.isFinalGate) return 'A 101. szinten az utolsó szerverterem vár, de nem Node őrzi... hanem én. Gallagher. Ne habozz, ECHO.';
                     return next.isSectorGate
                         ? `A ${next.floor}. szinten szektorhatár vár: szerverterem ${next.nodeBossCount} Nexus Node-dal. A központi liftterminál ott zárolva lesz, csak a szerverterem mögötti folyosó visz tovább a következő szektor pályaliftjéhez.`

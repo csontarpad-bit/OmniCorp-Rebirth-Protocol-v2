@@ -16,6 +16,7 @@ export class GameManager {
         this.pendingResearchArrival = false;
         this.researchVisitedFloor = 0;
         this.nodeState = 'none';
+        this.finalLiftStarted = false;
         this.pendingGateArrival = false;
         this.pendingTargetFloor = null;
         this.enemiesToSpawn = 5;
@@ -473,6 +474,7 @@ export class GameManager {
         this.researchFloorActive = true;
         this.researchVisitedFloor = this.currentWave;
         this.activeResearchFloor = this.currentWave;
+        if (this.currentWave === 101) this.finalLiftStarted = false;
         this.gameState = 'PLAYING';
         const floorInfo = getCampaignFloorInfo(this.currentWave);
         // A szektorhatár-szinteken a központi terminál nem használható: a lejutás csak az új lifttel lehetséges
@@ -805,13 +807,39 @@ export class GameManager {
             if (this.currentWave === 101 && boss && boss.type === 'boss' && boss.mesh) {
                 boss.isGallagher = true;
                 boss.mesh.traverse(object => {
-                    if (!object.isMesh || !object.material || !object.material.color) return;
-                    object.material = object.material.clone();
-                    object.material.color.lerp(new THREE.Color(0xdfeaff), 0.55);
-                    if (object.material.emissive) object.material.emissive.setHex(0x2255aa);
+                    if (!object.isMesh || !object.material) return;
+                    const materials = Array.isArray(object.material) ? object.material : [object.material];
+                    const tinted = materials.map(material => {
+                        if (!material || !material.color) return material;
+                        const clone = material.clone();
+                        clone.userData.gallagherBaseColor = material.color.getHex();
+                        clone.userData.gallagherBaseEmissive = material.emissive ? material.emissive.getHex() : null;
+                        clone.userData.gallagherBaseEmissiveIntensity = material.emissiveIntensity;
+                        clone.color.lerp(new THREE.Color(0xdfeaff), 0.55);
+                        if (clone.emissive) clone.emissive.setHex(0x2255aa);
+                        if (Array.isArray(boss.ownedMaterials)) boss.ownedMaterials.push(clone);
+                        return clone;
+                    });
+                    object.material = Array.isArray(object.material) ? tinted : tinted[0];
                 });
             }
         }
+    }
+
+    updateFinalLiftEntry() {
+        if (this.finalLiftStarted || this.currentWave !== 101 || this.nodeState !== 'unlocked' ||
+            !this.researchFloorActive || this.gameState !== 'PLAYING' || this.isWaveActive ||
+            !this.levelManager || !this.levelManager.finalPodRoomActive ||
+            !this.player || !this.player.camera) return;
+
+        const { x, z } = this.player.camera.position;
+        if (Math.hypot(x + sectorHallCenter, z) > 0.82) return;
+
+        this.finalLiftStarted = true;
+        this.player.playerVelX = 0;
+        this.player.playerVelZ = 0;
+        EventBus.emit('MAGLIFT_DEPARTING');
+        this.startWaveCountdown(false);
     }
 
     setResearchHubPromptVisible(visible, station = null) {
@@ -1012,6 +1040,7 @@ export class GameManager {
 
         this.updateTerminalProximity();
         this.updateNodeSection();
+        this.updateFinalLiftEntry();
         this.updateResearchHubProximity();
 
         // Ipari felvonó és zsilipkapu szekvencia a szintek között

@@ -21,6 +21,9 @@ class LevelManager {
         this.caveCollisions = [];
         this.cabinGroup = null;
         this.cabinCenter = null;
+        this.cabinDoorPanels = [];
+        this.cabinDoorProgress = 0;
+        this.cabinDoorTarget = 0;
         this.shaftWallMaterial = null;
         this.serverRoomGroup = null;
         this.sectorDressingGroups = {};
@@ -1439,14 +1442,7 @@ class LevelManager {
             for (const [object, visible] of this.sectorPodVisibility) object.visible = visible;
             return;
         }
-        const visibleObjects = new Set();
-        for (let object = this.sectorPodTerminalModel; object; object = object.parent) {
-            visibleObjects.add(object);
-            if (object === this.sectorRegenerationPod) break;
-        }
-        this.sectorRegenerationPod.traverse(object => {
-            object.visible = visibleObjects.has(object);
-        });
+        for (const [object] of this.sectorPodVisibility) object.visible = false;
     }
 
     setNodeDoorOpen(id, isOpen) {
@@ -1506,37 +1502,59 @@ class LevelManager {
     showSingleCabin(x, z) {
         if (!this.cabinGroup) {
             const group = new THREE.Group();
-            const frameMat = new THREE.MeshStandardMaterial({ color: 0x2b2f33, metalness: 0.8, roughness: 0.4 });
-            const glowMat = new THREE.MeshBasicMaterial({ color: 0xff3048 });
             const half = 1.25;
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x29333a, metalness: 0.88, roughness: 0.27 });
+            const armorMat = new THREE.MeshStandardMaterial({ color: 0x11191f, metalness: 0.72, roughness: 0.38 });
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x2b1016, metalness: 0.38, roughness: 0.2, emissive: 0x500810, emissiveIntensity: 1.1 });
+            const warningMat = new THREE.MeshStandardMaterial({ color: 0xff3348, emissive: 0xb80b1e, emissiveIntensity: 1.7, metalness: 0.2, roughness: 0.3 });
+            const part = (geometry, material, px, py, pz) => {
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(px, py, pz);
+                group.add(mesh);
+                return mesh;
+            };
+            part(new THREE.BoxGeometry(2.65, 0.18, 2.65), armorMat, 0, -0.03, 0);
+            part(new THREE.BoxGeometry(2.55, 0.08, 2.55), frameMat, 0, 0.08, 0);
+            part(new THREE.BoxGeometry(2.62, 0.12, 2.62), frameMat, 0, 3.24, 0);
             for (const sx of [-1, 1]) {
                 for (const sz of [-1, 1]) {
-                    const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.2, 0.12), frameMat);
-                    post.position.set(sx * half, 1.6, sz * half);
-                    group.add(post);
+                    part(new THREE.BoxGeometry(0.14, 3.2, 0.14), frameMat, sx * half, 1.65, sz * half);
                 }
-            }
-            for (const y of [0.05, 3.2]) {
-                const ring = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.12, 0.1, half * 2 + 0.12), frameMat);
-                ring.position.y = y;
-                group.add(ring);
             }
             for (const side of [-1, 1]) {
-                for (const axis of ['x', 'z']) {
-                    const bar = new THREE.Mesh(new THREE.BoxGeometry(axis === 'x' ? half * 2 : 0.05, 0.05, axis === 'x' ? 0.05 : half * 2), glowMat);
-                    bar.position.set(axis === 'x' ? 0 : side * half, 1.0, axis === 'x' ? side * half : 0);
-                    group.add(bar);
-                }
+                part(new THREE.BoxGeometry(0.09, 2.65, 0.72), armorMat, -half, 1.65, side * 0.86);
+                part(new THREE.BoxGeometry(0.09, 2.65, 0.72), armorMat, half, 1.65, side * 0.86);
+                part(new THREE.BoxGeometry(2.38, 2.65, 0.09), armorMat, 0, 1.65, side * half);
+                part(new THREE.BoxGeometry(0.035, 2.25, 0.025), glassMat, -half + 0.052, 1.65, side * 0.86);
+                part(new THREE.BoxGeometry(2.05, 0.035, 0.025), glassMat, 0, 2.92, side * half);
             }
-            const light = new THREE.PointLight(0xff3048, 1.2, 8);
-            light.position.y = 2.6;
+            for (const side of [-1, 1]) {
+                const panel = part(new THREE.BoxGeometry(0.08, 2.72, 0.69), armorMat, half - 0.05, 1.63, side * 0.34);
+                part(new THREE.BoxGeometry(0.04, 2.34, 0.035), warningMat, half + 0.005, 1.63, side * 0.34);
+                this.cabinDoorPanels.push({ mesh: panel, side });
+            }
+            const controlPanel = part(new THREE.BoxGeometry(0.12, 0.75, 0.34), frameMat, -0.72, 1.55, -half + 0.08);
+            controlPanel.rotation.y = Math.PI / 2;
+            part(new THREE.BoxGeometry(0.035, 0.42, 0.22), warningMat, -0.79, 1.6, -half + 0.1);
+            for (let i = 0; i < 6; i++) {
+                const strip = part(new THREE.BoxGeometry(0.16, 0.025, 0.025), i % 2 ? warningMat : glassMat, -0.95 + i * 0.38, 0.19, 0);
+                strip.rotation.y = Math.PI / 2;
+            }
+            const light = new THREE.PointLight(0xff3048, 2.4, 9, 1.6);
+            light.position.set(0, 2.8, 0);
             group.add(light);
+            const ceilingLight = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.035, 0.32), warningMat);
+            ceilingLight.position.set(0, 3.14, 0);
+            group.add(ceilingLight);
             this.cabinGroup = group;
             this.scene.add(group);
         }
         this.cabinGroup.position.set(x, 0, z);
         this.cabinGroup.visible = true;
         this.cabinCenter = { x, z };
+        this.cabinDoorProgress = 0;
+        this.cabinDoorTarget = 0;
+        this.updateCabinDoorPose();
     }
 
     hideSingleCabin() {
@@ -1544,66 +1562,150 @@ class LevelManager {
         this.cabinCenter = null;
     }
 
+    updateCabinDoorPose() {
+        for (const { mesh, side } of this.cabinDoorPanels) {
+            mesh.position.z = side * (0.78 - this.cabinDoorProgress * 0.44);
+        }
+    }
+
+    createCaveTexture(base, fleck, seed) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const context = canvas.getContext('2d');
+        context.fillStyle = base;
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        let state = seed;
+        for (let i = 0; i < 190; i++) {
+            state = (state * 1664525 + 1013904223) >>> 0;
+            const x = Math.random() * 512;
+            const y = Math.random() * 512;
+            const radius = 5 + (state % 420) / 10;
+            const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, i % 3 === 0 ? 'rgba(12,5,4,0.25)' : fleck);
+            gradient.addColorStop(1, 'rgba(0,0,0,0)');
+            context.fillStyle = gradient;
+            context.beginPath();
+            context.ellipse(x, y, radius, radius * (0.35 + Math.random() * 0.55), Math.random() * Math.PI, 0, Math.PI * 2);
+            context.fill();
+        }
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(2, 2);
+        texture.encoding = THREE.sRGBEncoding;
+        return texture;
+    }
+
     buildCave() {
         const group = new THREE.Group();
         group.position.x = this.caveWorldOffset;
-        const rockMat = new THREE.MeshStandardMaterial({ color: 0x3a2a24, roughness: 1, metalness: 0, emissive: 0x2a0905, emissiveIntensity: 0.6, flatShading: true });
         const collisions = [];
-        const ground = new THREE.Mesh(
-            new THREE.PlaneGeometry(70, 70),
-            new THREE.MeshStandardMaterial({ color: 0x33241d, roughness: 1, side: THREE.DoubleSide })
-        );
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.y = -0.02;
-        group.add(ground);
-        const spots = [];
-        for (const sx of [-1, 1]) {
-            for (const sz of [-1, 1]) {
-                spots.push([7 * sx, 7 * sz], [20 * sx, 7 * sz], [7 * sx, 20 * sz], [20 * sx, 20 * sz]);
-            }
-        }
-        spots.forEach(([x, z], i) => {
-            const radius = 1.0 + (i % 3) * 0.3;
-            const height = 2.8 + (i % 4) * 0.9;
-            const rock = new THREE.Mesh(new THREE.ConeGeometry(radius, height, 7), rockMat);
-            rock.position.set(x, height / 2, z);
-            rock.rotation.y = i * 0.9;
-            group.add(rock);
-            const reach = radius * 0.75;
-            collisions.push(new THREE.Box3(
-                new THREE.Vector3(x - reach + this.caveWorldOffset, 0, z - reach),
-                new THREE.Vector3(x + reach + this.caveWorldOffset, 3, z + reach)
-            ));
+        const rockTexture = this.createCaveTexture('#38251e', 'rgba(181,73,35,0.32)', 9817);
+        const floorTexture = this.createCaveTexture('#32241f', 'rgba(161,99,67,0.18)', 12661);
+        const rockMat = new THREE.MeshStandardMaterial({
+            color: 0xa89a8e, map: rockTexture,
+            roughness: 0.94, metalness: 0.02, flatShading: true
         });
-        for (const [x, z] of [[-10, -10], [10, -10], [-10, 10], [10, 10]]) {
-            const glow = new THREE.PointLight(0xff4a1a, 2.2, 22);
-            glow.position.set(x, 2.5, z);
-            group.add(glow);
-        }
+        const deepRockMat = new THREE.MeshStandardMaterial({
+            color: 0x756258, map: rockTexture,
+            roughness: 0.97, metalness: 0, flatShading: true
+        });
+        const floorMat = new THREE.MeshStandardMaterial({
+            color: 0x8d7b6e, map: floorTexture,
+            roughness: 0.96, metalness: 0.02, side: THREE.DoubleSide
+        });
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(70, 70, 1, 1), floorMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.025;
+        group.add(ground);
+
         const walls = new THREE.Group();
         walls.visible = false;
-        const wallRock = new THREE.MeshStandardMaterial({ color: 0x2a1a15, roughness: 1, metalness: 0, emissive: 0x1c0803, emissiveIntensity: 0.7, flatShading: true });
-        let n = 0;
-        for (let v = -26; v <= 26; v += 3.2) {
-            for (const [x, z] of [[v, -26.5], [v, 26.5], [-26.5, v], [26.5, v]]) {
-                const height = 7 + (n++ % 4) * 1.6;
-                const rock = new THREE.Mesh(new THREE.ConeGeometry(2.4 + (n % 3) * 0.4, height, 6), wallRock);
-                rock.position.set(x, height / 2 - 0.2, z);
-                rock.rotation.y = n * 1.3;
+        const wallRockGeo = new THREE.IcosahedronGeometry(1, 1);
+        const positions = wallRockGeo.attributes.position;
+        for (let i = 0; i < positions.count; i++) {
+            const variation = 0.82 + Math.random() * 0.38;
+            positions.setXYZ(i, positions.getX(i) * variation, positions.getY(i) * variation, positions.getZ(i) * variation);
+        }
+        wallRockGeo.computeVertexNormals();
+        let rockIndex = 0;
+        for (let value = -27; value <= 27; value += 3.1) {
+            for (const [x, z] of [[value, -27], [value, 27], [-27, value], [27, value]]) {
+                const rock = new THREE.Mesh(wallRockGeo, rockIndex++ % 3 ? rockMat : deepRockMat);
+                const size = 2.3 + Math.random() * 1.7;
+                rock.position.set(x + (Math.random() - 0.5) * 1.2, 2.2 + Math.random() * 2.0, z + (Math.random() - 0.5) * 1.2);
+                rock.scale.set(size * (0.7 + Math.random() * 0.6), 3.0 + Math.random() * 3.4, size * (0.7 + Math.random() * 0.6));
+                rock.rotation.set(Math.random() * 0.8, Math.random() * Math.PI, Math.random() * 0.5);
                 walls.add(rock);
-                const reach = 2.2;
+                const reach = size * 0.72;
                 collisions.push(new THREE.Box3(
-                    new THREE.Vector3(x - reach, 0, z - reach).add(new THREE.Vector3(this.caveWorldOffset, 0, 0)),
-                    new THREE.Vector3(x + reach, height, z + reach).add(new THREE.Vector3(this.caveWorldOffset, 0, 0))
+                    new THREE.Vector3(rock.position.x - reach + this.caveWorldOffset, 0, rock.position.z - reach),
+                    new THREE.Vector3(rock.position.x + reach + this.caveWorldOffset, 6, rock.position.z + reach)
                 ));
             }
         }
-        const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(70, 70), new THREE.MeshStandardMaterial({ color: 0x120a07, roughness: 1, side: THREE.DoubleSide }));
+
+        const stalactiteGeo = new THREE.ConeGeometry(1, 1, 7, 2);
+        for (let i = 0; i < 18; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 22 + Math.random() * 5;
+            const length = 1.4 + Math.random() * 2.6;
+            const spike = new THREE.Mesh(stalactiteGeo, i % 3 ? deepRockMat : rockMat);
+            spike.position.set(Math.cos(angle) * radius, 8.7 - length / 2, Math.sin(angle) * radius);
+            spike.scale.set(0.8 + Math.random() * 1.5, length, 0.8 + Math.random() * 1.5);
+            spike.rotation.x = Math.PI;
+            spike.rotation.z = (Math.random() - 0.5) * 0.32;
+            walls.add(spike);
+        }
+        const ceiling = new THREE.Mesh(
+            new THREE.PlaneGeometry(70, 70),
+            new THREE.MeshStandardMaterial({ color: 0x17100e, map: rockTexture, roughness: 1, side: THREE.DoubleSide })
+        );
         ceiling.rotation.x = Math.PI / 2;
-        ceiling.position.y = 9;
+        ceiling.position.y = 9.2;
         walls.add(ceiling);
         group.add(walls);
         this.caveWalls = walls;
+
+        const glowMats = [
+            new THREE.MeshStandardMaterial({ color: 0x2c9c88, emissive: 0x087665, emissiveIntensity: 0.9, roughness: 0.22, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({ color: 0xe75f2b, emissive: 0x9c260d, emissiveIntensity: 1.0, roughness: 0.28, metalness: 0.05 })
+        ];
+        for (let i = 0; i < 8; i++) {
+            const angle = i * Math.PI * 2 / 8;
+            const x = Math.cos(angle) * (13 + i % 3 * 2.5);
+            const z = Math.sin(angle) * (13 + i % 3 * 2.5);
+            const crystalMat = glowMats[i % 2];
+            for (let shard = 0; shard < 3; shard++) {
+                const height = 1.2 + ((i + shard) % 3) * 0.75;
+                const crystal = new THREE.Mesh(new THREE.ConeGeometry(0.28 + shard * 0.08, height, 6), crystalMat);
+                crystal.position.set(x + (shard - 1) * 0.42, height / 2, z + (shard % 2 ? 0.28 : -0.18));
+                crystal.rotation.z = (shard - 1) * 0.14;
+                group.add(crystal);
+            }
+            const light = new THREE.PointLight(i % 2 ? 0x26b89e : 0xff5327, 0.85, 13, 2);
+            light.position.set(x, 1.5, z);
+            group.add(light);
+        }
+
+        const fissureMat = new THREE.MeshBasicMaterial({ color: 0xff5428, transparent: true, opacity: 0.62 });
+        for (let i = 0; i < 7; i++) {
+            const x = (Math.random() - 0.5) * 26;
+            const z = (Math.random() - 0.5) * 26;
+            const points = [
+                new THREE.Vector3(x - 2.2, 0.012, z - 0.8),
+                new THREE.Vector3(x - 0.8, 0.012, z + 0.2),
+                new THREE.Vector3(x + 0.4, 0.012, z - 0.15),
+                new THREE.Vector3(x + 2.0, 0.012, z + 1.0)
+            ];
+            const vein = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, 0.035, 5, false), fissureMat);
+            group.add(vein);
+        }
+        const coreGlow = new THREE.PointLight(0xff4a21, 0.65, 36, 2);
+        coreGlow.position.set(0, 1.2, 0);
+        group.add(coreGlow);
+
         group.visible = false;
         this.scene.add(group);
         this.caveGroup = group;
@@ -1708,6 +1810,7 @@ class LevelManager {
             this.cabinCenter = { x: data.singleCabin.x, z: data.singleCabin.z };
         } else if (data && data.singleCabin) this.showSingleCabin(data.singleCabin.x, data.singleCabin.z);
         else this.hideSingleCabin();
+        if (this.cabinGroup && this.cabinGroup.visible) this.cabinDoorTarget = 1;
         this.targetElevatorSpeed = 0.8; // 50%-kal lassabb sebesség a felvonó mozgásához (1.6 helyett 0.8)
         this.elevatorTransitTimer = 0;
         if (this.gatesGroup) {
@@ -1814,7 +1917,10 @@ class LevelManager {
 
     // --- ZSILIPKAPU NYITÁS ÉS ZÁRÁS VEZÉRLÉS ---
     openDoors(duration = 7.5) {
-        this.hideSingleCabin();
+        if (this.cabinGroup && this.cabinGroup.visible) {
+            this.cabinDoorTarget = 0;
+            if (!this.caveShellHidden) this.hideSingleCabin();
+        }
         this.isDoorsOpen = true;
         this.elevatorTransitTimer = 0;
         this.smokeTickTimer = 0.0;
@@ -1912,6 +2018,13 @@ class LevelManager {
 
     update(delta) {
         this.updateNodeDoors(delta);
+        if (this.cabinDoorProgress !== this.cabinDoorTarget) {
+            this.cabinDoorProgress = THREE.MathUtils.damp(this.cabinDoorProgress, this.cabinDoorTarget, 4.5, delta);
+            if (Math.abs(this.cabinDoorProgress - this.cabinDoorTarget) < 0.005) {
+                this.cabinDoorProgress = this.cabinDoorTarget;
+            }
+            this.updateCabinDoorPose();
+        }
         for (const terminal of this.researchTerminalAnimations) {
             if (terminal.time === terminal.targetTime) continue;
             const direction = Math.sign(terminal.targetTime - terminal.time);
