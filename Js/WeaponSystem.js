@@ -64,7 +64,7 @@ export class WeaponSystem {
         EventBus.on('input:bash', () => this.onBash());
         EventBus.on('FORCE_WEAPON_SWITCH', (id) => this.forceWeaponSwitch(id));
         EventBus.on('SWITCH_WEAPON_NEXT', () => this.switchNextWeapon());
-        EventBus.on('GIVE_GLOBAL_AMMO', () => this.giveGlobalAmmo());
+        EventBus.on('GIVE_AMMO', (data) => this.giveAmmo(data));
         EventBus.on('WEAPON_BUSY_STATE', (isBusy) => { this.isWeaponBusy = isBusy; });
         EventBus.on('START_GAME', () => this.reset());
         EventBus.on('GAME_OVER', () => this.hideAllWeapons());
@@ -101,16 +101,10 @@ export class WeaponSystem {
         this._eventsBound = false;
     }
 
-    giveGlobalAmmo() {
-        for (let key in this.weapons) {
-            let w = this.weapons[key];
-            if (w && w.owned && key !== 'melee') {
-                if (w.ammo < w.maxAmmo) {
-                    w.ammo = w.maxAmmo;
-                }
-                let fillAmount = Math.ceil(w.maxReserve * 0.25);
-                w.reserve = Math.min(w.maxReserve, w.reserve + fillAmount);
-            }
+    giveAmmo({ weaponId, amount }) {
+        const w = this.weapons[weaponId];
+        if (w && w.owned && weaponId !== 'melee') {
+            w.reserve = Math.min(w.maxReserve, w.reserve + amount);
         }
         let cur = this.weapons[this.currentWeaponId];
         if (cur) {
@@ -326,6 +320,7 @@ export class WeaponSystem {
             ? action._clip.duration / action.timeScale
             : 0.25;
 
+        this.reloadToken = (this.reloadToken || 0) + 1;
         this.terminalWeaponHolstered = true;
         this.isWeaponBusy = true;
         this.terminalWeaponTransition = { type: 'holster', weaponId, elapsed: 0, duration };
@@ -448,6 +443,7 @@ export class WeaponSystem {
     forceWeaponSwitch(targetWeaponId = 'melee') {
         if (this.currentWeaponId === targetWeaponId) return;
         if (!this.weapons[targetWeaponId] || !this.weapons[targetWeaponId].owned) return;
+        this.reloadToken = (this.reloadToken || 0) + 1;
 
         this.isWeaponBusy = true;
         this.isReloading = false;
@@ -533,7 +529,12 @@ export class WeaponSystem {
         this.isWeaponBusy = true;
         this.isReloading = false;
         if (wpn.auto) this.autoShootTimer = wpn.fireRate;
-        this.handleFire();
+        try {
+            this.handleFire();
+        } catch (error) {
+            console.error('[WeaponSystem] handleFire hiba:', error);
+            setTimeout(() => { this.isWeaponBusy = false; }, 250);
+        }
     }
 
     onShootStop() {
@@ -775,6 +776,8 @@ export class WeaponSystem {
         this.isReloading = true;
         this.isWeaponBusy = true;
         this.cancelReloadRequested = false;
+        const reloadToken = this.reloadToken = (this.reloadToken || 0) + 1;
+        this.reloadStartedAt = performance.now();
 
         EventBus.emit('RELOAD_START', { weaponId: this.currentWeaponId });
 
@@ -801,7 +804,7 @@ export class WeaponSystem {
             let animDuration = (action && action._clip) ? (action._clip.duration * 1000) : wpn.reloadTime;
 
             setTimeout(() => {
-                if (!this.isReloading) return;
+                if (!this.isReloading || this.reloadToken !== reloadToken) return;
                 const load = Math.min(wpn.maxAmmo - wpn.ammo, wpn.reserve);
                 wpn.ammo += load;
                 wpn.reserve -= load;
@@ -1014,6 +1017,32 @@ export class WeaponSystem {
         }
 
         if (this.meleeCooldown > 0) this.meleeCooldown -= delta;
+
+        // Őrkutya: ha a fegyver hosszan "foglalt" állapotban ragad, feloldjuk (újratöltés blokkolás ellen)
+        if (this.isWeaponBusy && !this.isReloading && !this.isChargingMelee && !this.terminalWeaponTransition && this.currentWeaponId !== 'heal') {
+            this.busyWatchdog = (this.busyWatchdog || 0) + delta;
+            if (this.busyWatchdog > 4.0) {
+                this.isWeaponBusy = false;
+                this.busyWatchdog = 0;
+            }
+        } else {
+            this.busyWatchdog = 0;
+        }
+
+        // Beragadt újratöltés (pl. megszakadt időzítő lánc) feloldása
+        if (this.isReloading && this.reloadStartedAt && performance.now() - this.reloadStartedAt > 20000) {
+            this.isReloading = false;
+            this.isWeaponBusy = false;
+            this.cancelReloadRequested = true;
+            this.reloadToken = (this.reloadToken || 0) + 1;
+            if (this.reloadInterval) { clearInterval(this.reloadInterval); this.reloadInterval = null; }
+            EventBus.emit('RELOAD_END');
+        }
+
+        // Ha a gombot az ablakon kívül engedték el, a kés feltöltése nem ragadhat be
+        if (this.isChargingMelee && inputManager && !inputManager.isShootingBtnPressed) {
+            this.onShootStop();
+        }
 
         // Melee feltöltés (Charge)
         if (this.isChargingMelee) {

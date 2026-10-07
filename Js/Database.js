@@ -5,6 +5,14 @@ export { generateEnemyStatHTML } from './UITemplates.js';
 
 export const ammoPrices = Object.freeze({ pistol: 1, rifle: 2, shotgun: 3, super: 10 });
 
+// A földön talált lőszerdoboz esélytáblázata: súly = esély, min/max = tartalékba kerülő töltények száma
+export const ammoDropTable = Object.freeze({
+    pistol: { weight: 50, min: 6, max: 14, color: 0xffcc00 },
+    rifle: { weight: 28, min: 15, max: 36, color: 0x66ccff },
+    shotgun: { weight: 16, min: 3, max: 8, color: 0xff8844 },
+    super: { weight: 6, min: 1, max: 3, color: 0xff3355 }
+});
+
 export const weapons = {
     melee: { name: 'Taktikai Kés', level: 1, damage: 0.5, ammo: Infinity, reserve: Infinity, maxAmmo: Infinity, maxReserve: Infinity, pellets: 1, spread: 0, reloadTime: 0, owned: true, auto: false, fireRate: 0, image: "" },
     pistol: { name: 'Pisztoly', level: 1, damage: 1, ammo: 10, reserve: 30, maxAmmo: 10, maxReserve: 30, pellets: 1, spread: 0, reloadTime: 1500, owned: true, auto: false, fireRate: 0, image: "https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/45abc3b3555b01cf93886d8560800ff7f3c5871c/pisztoly.png" },

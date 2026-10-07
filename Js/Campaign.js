@@ -1,16 +1,25 @@
+export const sectorGateFloors = [31, 61, 101];
+export const caveFloor = 102;
+export const finalFloor = 102;
+
 export function getCampaignFloorInfo(floor) {
-    const safeFloor = Math.min(100, Math.max(1, Math.floor(floor)));
-    const sector = safeFloor <= 30
-        ? { id: 'alpha', name: 'ALPHA', range: '0–30', color: 0x00ff99 }
-        : safeFloor <= 60
-            ? { id: 'beta', name: 'BÉTA', range: '31–60', color: 0xff9b32 }
-            : { id: 'omega', name: 'OMEGA', range: '61–100', color: 0xff3048 };
+    const safeFloor = Math.min(finalFloor, Math.max(1, Math.floor(floor)));
+    // A szektorhatár-szintek (31., 61., 101.) még a régi szektor pályalifthez tartoznak
+    const sector = safeFloor <= 31
+        ? { id: 'alpha', name: 'ALPHA', range: '1–31', color: 0x00ff99 }
+        : safeFloor <= 61
+            ? { id: 'beta', name: 'BÉTA', range: '32–61', color: 0xff9b32 }
+            : { id: 'omega', name: 'OMEGA', range: '62–101', color: 0xff3048 };
 
     return {
         floor: safeFloor,
         sector,
-        isResearchFloor: safeFloor % 10 === 0,
-        bossCount: safeFloor === 30 ? 1 : safeFloor === 60 ? 2 : safeFloor === 100 ? 3 : 0
+        isResearchFloor: safeFloor % 10 === 0 && safeFloor <= 100,
+        isCaveFloor: safeFloor === caveFloor,
+        isSectorGate: sectorGateFloors.includes(safeFloor),
+        isFinalGate: safeFloor === 101,
+        bossCount: safeFloor === caveFloor ? 3 : 0,
+        nodeBossCount: safeFloor === 31 ? 1 : safeFloor === 61 ? 2 : safeFloor === 101 ? 1 : 0
     };
 }
 
@@ -21,10 +30,37 @@ export const researchHubStations = [
     { id: 'comms', label: 'KOMMUNIKÁCIÓ', x: -39, z: 0, color: 0xff4f70 }
 ];
 
-export function getResearchHubStationAt(position, maxDistance = 2.5) {
+// Szektorhatár-szintek (31., 61., 101.): nyugati folyosó -> kapu -> szerverterem -> feloldó terminál -> kijárati folyosó.
+// Minden távolság a központi aréna közepétől mért, nyugat (-X) felé.
+export const researchNodeSection = {
+    corridorStart: 26,
+    gateDistance: 46,
+    roomEndDistance: 76,
+    exitCorridorEnd: 96,
+    liftEndDistance: 110,
+    corridorHalfWidth: 3.2,
+    roomHalfWidth: 12,
+    lockDistance: 50,
+    bossDistance: 68,
+    terminalDistance: 74.7,
+    terminalZ: 8,
+    terminalStation: { x: -73, z: 8 }
+};
+
+export const nodeUnlockStation = { id: 'unlock', label: 'KRONOS ZÁR // FELOLDÁS', ...researchNodeSection.terminalStation, color: 0x00d9ff };
+
+export function isInResearchNodeRoom(x, z) {
+    const s = researchNodeSection;
+    return -x > s.gateDistance + 0.3 && -x < s.roomEndDistance && Math.abs(z) < s.roomHalfWidth;
+}
+
+// A szektor-aréna közepe: a falvastagsággal (2 m) és a félszélességgel (25 m) a folyosó végétől
+export const sectorHallCenter = researchNodeSection.liftEndDistance + 27;
+
+export function getResearchHubStationAt(position, maxDistance = 2.5, stations = researchHubStations) {
     let closest = null;
     let closestDistance = maxDistance;
-    for (const station of researchHubStations) {
+    for (const station of stations) {
         const distance = Math.hypot(position.x - station.x, position.z - station.z);
         if (distance <= closestDistance) {
             closest = station;
@@ -43,6 +79,6 @@ export const researchCommsLog = {
     60: { signal: 'ZAVAROS', mood: 'tired', text: 'Két Nexus Node védi a következő zsilipet. Ne hagyd, hogy bekerítsenek. Siess, ECHO... nincs sok időm.' },
     70: { signal: 'ZAVAROS', mood: 'glitch', text: 'A Kaptártudat már a falakon keresztül is figyel. Hallom, ahogy kattog a vezetékekben... Maradj tiszta, bármi áron.' },
     80: { signal: 'TORZ', mood: 'glitch', text: 'ECHO... *köhögés* A gépnek igaza volt. Én is a hálózat része vagyok már. De még tartom az ajtót a Maghoz. Vedd fel a Revolvert az asztalról.' },
-    90: { signal: 'TORZ', mood: 'glitch', text: 'A Mag közel van. A következő megálló lesz az utolsó. Három Node tartja zárva a kaput. Lőjj át mindenen... rajtam is.' },
-    100: { signal: 'MEGSZAKADT', mood: 'glitch', text: 'Három Node tartja zárva a Magot. ECHO... fejezd be. Öld meg a Nexust.' }
+    90: { signal: 'TORZ', mood: 'glitch', text: 'A Mag közel van. A 101. szinten az utolsó szerverterem vár, és ott... nem a Node áll az utadban. Én leszek az. Bocsáss meg előre.' },
+    100: { signal: 'MEGSZAKADT', mood: 'glitch', text: 'A 101-es szerverteremben várlak, ECHO. Az az utolsó zár. Utána már csak a Mag barlangja marad.' }
 };

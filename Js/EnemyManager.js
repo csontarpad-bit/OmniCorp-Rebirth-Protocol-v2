@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
 import { difficultySettings } from './Database.js';
+import { isInResearchNodeRoom, sectorHallCenter } from './Campaign.js';
 
 export class EnemyManager {
     constructor() {
@@ -370,6 +371,29 @@ export class EnemyManager {
     }
 
     getEdgeSpawnPosition(type = null) {
+        const arenaOffsetX = this.navigation && this.navigation.levelManager &&
+            this.navigation.levelManager.caveWorldOffset
+            ? this.navigation.levelManager.caveWorldOffset
+            : 0;
+        if (arenaOffsetX !== 0) {
+            if (type === 'boss') {
+                const caveBossSpawns = [
+                    { x: -10, z: 0 },
+                    { x: 10, z: -8 },
+                    { x: 0, z: 10 }
+                ];
+                const spawn = caveBossSpawns[this.bossSpawnCursor % caveBossSpawns.length];
+                this.bossSpawnCursor++;
+                return { x: arenaOffsetX + spawn.x, z: spawn.z, dirX: 0, dirZ: 0 };
+            }
+            return {
+                x: arenaOffsetX + (Math.random() - 0.5) * 34,
+                z: (Math.random() - 0.5) * 34,
+                dirX: 0,
+                dirZ: 0
+            };
+        }
+
         // 12 folyosó bejárat (mind a 4 falon 3-3 bejárat)
         const corridorSpawns = (this.navigation && this.navigation.levelManager && this.navigation.levelManager.corridorSpawns && this.navigation.levelManager.corridorSpawns.length > 0)
             ? this.navigation.levelManager.corridorSpawns
@@ -411,7 +435,7 @@ export class EnemyManager {
             sZ += pick.dirZ * 3.5;
         }
 
-        return { x: sX, z: sZ, dirX: pick.dirX, dirZ: pick.dirZ };
+        return { x: sX + arenaOffsetX, z: sZ, dirX: pick.dirX, dirZ: pick.dirZ };
     }
 
     spawnEnemy(x, z, isBoss = false, forceType = null, currentWave = 1, difficultyStats = { health: 100, speed: 1.0 }, initialDir = null) { 
@@ -430,17 +454,20 @@ export class EnemyManager {
         let enemyRadius = this.getEnemyRadius({ type: type });
         
         // Ha a főteremben spawnolna (nem folyosón), ellenőrizzük a fal- és sarokkorlátokat:
-        let inCorridor = (Math.abs(x) > 24.5 || Math.abs(z) > 24.5);
+        const arenaOffsetX = currentWave === 102 ? -sectorHallCenter : 0;
+        let localX = x - arenaOffsetX;
+        let inCorridor = (Math.abs(localX) > 24.5 || Math.abs(z) > 24.5);
         if (!inCorridor) {
             let maxEdge = (type === 'boss') ? 19.0 : (type === 'tank' ? 20.5 : 22.0);
             let maxCorner = (type === 'boss') ? 16.0 : (type === 'tank' ? 17.5 : 20.0);
             
-            if (Math.abs(x) > maxEdge) x = Math.sign(x) * maxEdge;
+            if (Math.abs(localX) > maxEdge) localX = Math.sign(localX) * maxEdge;
             if (Math.abs(z) > maxEdge) z = Math.sign(z) * maxEdge;
-            if (Math.abs(x) > maxCorner && Math.abs(z) > maxCorner) {
-                if (Math.abs(x) > Math.abs(z)) x = Math.sign(x) * maxCorner;
+            if (Math.abs(localX) > maxCorner && Math.abs(z) > maxCorner) {
+                if (Math.abs(localX) > Math.abs(z)) localX = Math.sign(localX) * maxCorner;
                 else z = Math.sign(z) * maxCorner;
             }
+            x = localX + arenaOffsetX;
 
             // Biztonsági fal- és oszlopütközés elkerülés a teremben:
             if (this.navigation && this.navigation.levelManager) {
@@ -448,7 +475,7 @@ export class EnemyManager {
                 let checkRadius = enemyRadius + 0.5;
                 let attempts = 0;
                 while (level.checkWallCollision(x, z, checkRadius) && attempts < 25) {
-                    x *= 0.88;
+                    x = arenaOffsetX + (x - arenaOffsetX) * 0.88;
                     z *= 0.88;
                     attempts++;
                 }
@@ -529,7 +556,8 @@ export class EnemyManager {
         else if (type === 'runner') groundY = 0.12;
         mesh.position.set(x, groundY, z);
 
-        let initDirX = (initialDir && initialDir.dirX !== undefined) ? initialDir.dirX : (Math.abs(x) > 24.5 ? -Math.sign(x) : 0);
+        const spawnLocalX = x - (currentWave === 102 ? -sectorHallCenter : 0);
+        let initDirX = (initialDir && initialDir.dirX !== undefined) ? initialDir.dirX : (Math.abs(spawnLocalX) > 24.5 ? -Math.sign(spawnLocalX) : 0);
         let initDirZ = (initialDir && initialDir.dirZ !== undefined) ? initialDir.dirZ : (Math.abs(z) > 24.5 ? -Math.sign(z) : 0);
         if (initDirX !== 0 || initDirZ !== 0) {
             let initAngle = Math.atan2(initDirX, initDirZ);
@@ -1453,7 +1481,12 @@ export class EnemyManager {
                     if (this.navigation) {
                         let dir = this.navigation.getBestDirection(en, targetPos, delta);
                         let enemyRadius = this.getEnemyRadius(en);
-                        if (en.type === 'boss' && (Math.abs(en.mesh.position.x) > 24.0 || Math.abs(en.mesh.position.z) > 24.0)) {
+                        const arenaOffsetX = this.navigation.levelManager
+                            ? this.navigation.levelManager.caveWorldOffset || 0
+                            : 0;
+                        const localEnemyX = en.mesh.position.x - arenaOffsetX;
+                        if (en.type === 'boss' && (Math.abs(localEnemyX) > 24.0 || Math.abs(en.mesh.position.z) > 24.0) &&
+                            !isInResearchNodeRoom(localEnemyX, en.mesh.position.z)) {
                             enemyRadius = 1.5;
                         }
                         let mX = dir.x * en.speed * delta;
@@ -1551,12 +1584,17 @@ export class EnemyManager {
                         
                         // Boss folyosón belüli egyenes haladása és védettsége:
                         // Ha a Boss a folyosóban van (|x| > 24 vagy |z| > 24), a folyosó tengelyén halad befelé az arénába!
-                        let inCorridor = (Math.abs(en.mesh.position.x) > 24.0 || Math.abs(en.mesh.position.z) > 24.0);
+                        const arenaOffsetX = this.navigation.levelManager
+                            ? this.navigation.levelManager.caveWorldOffset || 0
+                            : 0;
+                        const localEnemyX = en.mesh.position.x - arenaOffsetX;
+                        let inCorridor = (Math.abs(localEnemyX) > 24.0 || Math.abs(en.mesh.position.z) > 24.0) &&
+                            !isInResearchNodeRoom(localEnemyX, en.mesh.position.z);
                         if (en.type === 'boss' && inCorridor) {
                             if (en.mesh.position.z < -24.0) dir.set(0, 0, 1);
                             else if (en.mesh.position.z > 24.0) dir.set(0, 0, -1);
-                            else if (en.mesh.position.x < -24.0) dir.set(1, 0, 0);
-                            else if (en.mesh.position.x > 24.0) dir.set(-1, 0, 0);
+                            else if (localEnemyX < -24.0) dir.set(1, 0, 0);
+                            else if (localEnemyX > 24.0) dir.set(-1, 0, 0);
                             enemyRadius = 1.5; // Kisebb hatósugár a folyosón, hogy még véletlenül se akadjon be a zsilip peremébe
                         }
 

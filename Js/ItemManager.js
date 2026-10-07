@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
 import { playerStats, savePlayerStats } from './RuntimeState.js';
+import { weapons, ammoDropTable } from './Database.js';
 
 class ItemManager {
     constructor() {
@@ -216,7 +217,24 @@ class ItemManager {
         this.lootItems.push({ mesh: mesh, type: 'health' });
     }
 
+    rollAmmoDrop() {
+        const candidates = Object.keys(ammoDropTable).filter(id => weapons[id] && weapons[id].owned);
+        if (candidates.length === 0) return null;
+        const total = candidates.reduce((sum, id) => sum + ammoDropTable[id].weight, 0);
+        let roll = Math.random() * total;
+        let weaponId = candidates[candidates.length - 1];
+        for (const id of candidates) {
+            roll -= ammoDropTable[id].weight;
+            if (roll < 0) { weaponId = id; break; }
+        }
+        const entry = ammoDropTable[weaponId];
+        const amount = entry.min + Math.floor(Math.random() * (entry.max - entry.min + 1));
+        return { weaponId, amount, color: entry.color };
+    }
+
     spawnAmmoBox(x, z) {
+        const drop = this.rollAmmoDrop();
+        if (!drop) return;
         let modelData = this.assetManager ? (this.assetManager.cloneModel('ammo') || this.assetManager.cloneModel('ammoModel')) : null;
         if (!modelData) return;
         let mesh = modelData.mesh;
@@ -227,7 +245,7 @@ class ItemManager {
         mesh.traverse((c) => {
             if (c.isMesh && c.material) {
                 c.material = c.material.clone();
-                c.material.emissive = new THREE.Color(0xffcc00); 
+                c.material.emissive = new THREE.Color(drop.color); 
                 c.material.emissiveIntensity = 0.1;
             }
         });
@@ -235,7 +253,7 @@ class ItemManager {
         mesh.userData = { isLoot: true, type: 'ammo' };
 
         this.scene.add(mesh);
-        this.lootItems.push({ mesh: mesh, type: 'ammo' });
+        this.lootItems.push({ mesh: mesh, type: 'ammo', weaponId: drop.weaponId, amount: drop.amount });
     }
 
     createToxicPuddle(x, z) {
@@ -688,8 +706,12 @@ class ItemManager {
                         EventBus.emit('ADD_MEDKIT', 1);
                         EventBus.emit('SHOW_LOOT_POPUP', { text: '+1 GEN-STAB BEGYŰJTVE', color: '#00ff00' });
                     } else if (this.activeLootTarget.type === 'ammo') {
-                        EventBus.emit('GIVE_GLOBAL_AMMO');
-                        EventBus.emit('SHOW_LOOT_POPUP', { text: '+ LŐSZER BEGYŰJTVE', color: '#ffcc00' });
+                        const lootWeapon = weapons[this.activeLootTarget.weaponId];
+                        EventBus.emit('GIVE_AMMO', { weaponId: this.activeLootTarget.weaponId, amount: this.activeLootTarget.amount });
+                        EventBus.emit('SHOW_LOOT_POPUP', {
+                            text: `+${this.activeLootTarget.amount} ${lootWeapon ? lootWeapon.name.toUpperCase() : ''} LŐSZER`,
+                            color: '#ffcc00'
+                        });
                         const ammoFlash = document.getElementById('ammo-flash');
                         if (ammoFlash) {
                             ammoFlash.style.opacity = '1';

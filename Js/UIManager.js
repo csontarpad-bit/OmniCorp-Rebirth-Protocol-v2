@@ -80,7 +80,7 @@ class UIManager {
         });
         EventBus.on('START_GAME', () => this.commsConversations.clear());
         EventBus.on('DEV_FLOOR_TARGET_SET', ({ floor }) => this.updateDevFloorStatus(`${floor}. EMELET BEÁLLÍTVA A KÖVETKEZŐ LIFTÚTHOZ.`));
-        EventBus.on('DEV_FLOOR_TARGET_FAILED', () => this.updateDevFloorStatus('ÉRVÉNYTELEN SZINT. 1 ÉS 100 KÖZÖTTI EGÉSZ SZÁMOT ADJ MEG.'));
+        EventBus.on('DEV_FLOOR_TARGET_FAILED', () => this.updateDevFloorStatus('ÉRVÉNYTELEN SZINT. 1 ÉS 102 KÖZÖTTI EGÉSZ SZÁMOT ADJ MEG.'));
         EventBus.on('STERILIZATION_CONFIRMATION_REQUEST', (data) => this.showSterilizationConfirmation(data));
         EventBus.on('STERILIZATION_STARTED', () => {
             if (this.shopMenu) this.shopMenu.classList.add('hidden');
@@ -97,10 +97,22 @@ class UIManager {
         });
         EventBus.on('WAVE_STARTING', (data) => {
             const floorInfo = getCampaignFloorInfo(data.wave);
-            const label = floorInfo.bossCount
+            if (data.isCave) {
+                this.showWaveBriefing('ÁTSZÁLLÁS EGYSZEMÉLYES MAGLIFTBE — LEESÉS A BARLANGBA', 5000);
+                return;
+            }
+            const label = floorInfo.isSectorGate
+                ? `${floorInfo.sector.name} SZEKTORHATÁR // ${data.wave}. EMELET`
+                : floorInfo.bossCount
                 ? `KRONOS SZERVERTEREM // ${floorInfo.bossCount} NEXUS NODE`
                 : `${floorInfo.sector.name} SZEKTOR // ${data.wave}. EMELET`;
             this.showWaveBriefing(`${label} — LIFTINDÍTÁS`);
+        });
+        EventBus.on('SCREEN_FADE', (data) => {
+            const overlay = document.getElementById('fade-overlay');
+            if (!overlay) return;
+            overlay.style.transition = 'opacity ' + ((data.ms || 500) / 1000) + 's ease-in-out';
+            overlay.style.opacity = data.black ? '1' : '0';
         });
         EventBus.on('ELEVATOR_ARRIVED', (data) => {
             this.showWaveBriefing(`${data.wave}. EMELET ELÉRVE`);
@@ -110,9 +122,11 @@ class UIManager {
         });
         EventBus.on('WAVE_STARTED', (data) => {
             const floorInfo = getCampaignFloorInfo(data.wave);
-            if (floorInfo.bossCount > 0) {
+            if (floorInfo.isFinalGate) {
+                this.showWaveBriefing('OMEGA SZERVERTEREM // GALLAGHER', 3200);
+            } else if (floorInfo.bossCount > 0) {
                 this.showWaveBriefing(
-                    data.wave === 100 ? '100. EMELET // VÉGSŐ HARC — 3 NEXUS NODE' : `${floorInfo.sector.name} SZERVERTEREM — ${floorInfo.bossCount} NEXUS NODE`,
+                    data.wave === 102 ? 'KRONOS BARLANG // VÉGSŐ HARC — 3 NEXUS NODE' : `${floorInfo.sector.name} SZERVERTEREM — ${floorInfo.bossCount} NEXUS NODE`,
                     3200
                 );
             } else {
@@ -125,14 +139,22 @@ class UIManager {
                 : `${data.wave}. EMELET LEZÁRVA — KÖZÉPSŐ TERMINÁL [E]`, 3600);
         });
         EventBus.on('RESEARCH_FLOOR_ENTERED', (data) => {
-            this.showWaveBriefing(`R&D SZINT // ${data.floor}. EMELET — BIZTONSÁGOS ZÓNA`, 3600);
+            this.showWaveBriefing(data.isGate
+                ? `${data.isFinal ? 'UTOLSÓ' : data.sector} SZEKTORHATÁR // ${data.floor}. EMELET — A KÖZPONTI TERMINÁL ZÁROLVA, NYUGATI FOLYOSÓ A SZERVERTEREMHEZ`
+                : `R&D SZINT // ${data.floor}. EMELET — BIZTONSÁGOS ZÓNA`, 3600);
+        });
+        EventBus.on('NODE_GATE_SET', (data) => {
+            if (!data.open) this.showWaveBriefing(data.isFinal ? 'SZERVERTEREM LEZÁRVA — GALLAGHER VÁR' : 'SZERVERTEREM LEZÁRVA — NEXUS NODE AKTÍV', 3200);
+        });
+        EventBus.on('NODE_CLEARED', (data) => {
+            this.showWaveBriefing(data && data.isFinal ? 'GALLAGHER LEGYŐZVE — FELOLDÓ TERMINÁL AKTÍV' : 'NEXUS NODE LEGYŐZVE — FELOLDÓ TERMINÁL AKTÍV', 4200);
         });
         EventBus.on('CAMPAIGN_COMPLETED', (data) => {
             const heading = document.querySelector('#game-over h1');
             const finalWave = document.getElementById('final-wave');
             const finalScore = document.getElementById('final-score');
             if (heading) heading.textContent = 'KRONOS PROTOKOLL MEGSZAKÍTVA';
-            if (finalWave) finalWave.textContent = `${data.floor}. EMELET — 3 NEXUS NODE LEGYŐZVE`;
+            if (finalWave) finalWave.textContent = `${data.floor}. EMELET — GALLAGHER ÉS 3 NEXUS NODE LEGYŐZVE`;
             if (finalScore) finalScore.textContent = `ADAT: ${data.score} CR`;
             const overlay = document.getElementById('game-over');
             const gameUI = document.getElementById('game-ui-wrapper');
@@ -751,6 +773,7 @@ class UIManager {
         const devWave = document.getElementById('dev-wave-99');
         const devUnlock = document.getElementById('dev-unlock-all');
         const devGod = document.getElementById('dev-god-mode');
+        const devMax = document.getElementById('dev-max-all');
         const devFloorInput = document.getElementById('dev-floor-input');
         const devFloorButton = document.getElementById('dev-set-floor');
         const devFloorStatus = document.getElementById('dev-floor-status');
@@ -770,8 +793,8 @@ class UIManager {
         if (devFloorButton && devFloorInput && devFloorStatus) {
             devFloorButton.addEventListener('click', () => {
                 const floor = Number(devFloorInput.value);
-                if (!Number.isInteger(floor) || floor < 1 || floor > 100) {
-                    devFloorStatus.textContent = 'ÉRVÉNYTELEN SZINT. 1 ÉS 100 KÖZÖTTI EGÉSZ SZÁMOT ADJ MEG.';
+                if (!Number.isInteger(floor) || floor < 1 || floor > 102) {
+                    devFloorStatus.textContent = 'ÉRVÉNYTELEN SZINT. 1 ÉS 102 KÖZÖTTI EGÉSZ SZÁMOT ADJ MEG.';
                     return;
                 }
                 EventBus.emit('DEV_SET_FLOOR', floor);
@@ -812,6 +835,14 @@ class UIManager {
                 }
                 devUnlock.style.background = "#00ffff"; devUnlock.style.color = "#000";
                 setTimeout(() => { devUnlock.style.background = "rgba(0, 50, 50, 0.8)"; devUnlock.style.color = "#00ffff"; }, 150);
+            });
+        }
+
+        if (devMax) {
+            devMax.addEventListener('click', () => {
+                EventBus.emit('DEV_MAX_ALL');
+                devMax.style.background = "#ffcc00"; devMax.style.color = "#000";
+                setTimeout(() => { devMax.style.background = "rgba(50, 40, 0, 0.8)"; devMax.style.color = "#ffcc00"; }, 150);
             });
         }
 
@@ -1433,6 +1464,7 @@ class UIManager {
             armory: { title: 'FEGYVERÉSZET', color: '#ffb347', sub: 'IPARI MOLEKULÁRIS KOHÓ // FEGYVERKALIBRÁLÁS ÉS REZONÁTOR', buttons: ['buy-pistol', 'buy-shotgun', 'buy-rifle', 'buy-super', 'buy-resonator'] },
             augmentation: { title: 'MODIFIKÁCIÓ', color: '#00d9ff', sub: 'AUTO-DOKTOR // IMPLANTÁTUMOK ÉS NEURÁLIS FEJLESZTÉS', buttons: [] },
             regeneration: { title: 'REGENERÁCIÓ', color: '#49bfff', sub: 'DIALÍZIS KAMRA // NEXUS SYNC TISZTÍTÁS ÉS GEN-STAB KÉSZLET', buttons: ['buy-infection-clean', 'buy-medkit'] },
+            unlock: { title: 'KRONOS ZÁR', color: '#00d9ff', sub: 'SZEKTORZÁR // KIJÁRATI KAPU FELOLDÁSA', buttons: [] },
             comms: { title: 'KOMMUNIKÁCIÓ', color: '#ff4f70', sub: 'ÓLOMFALAS RÁDIÓSZOBA // BIZTONSÁGOS CSATORNA', buttons: [] }
         };
     }
@@ -1502,6 +1534,22 @@ class UIManager {
         specialTab?.style.setProperty('display', 'none');
         specialView?.classList.add('hidden');
 
+        if (data.researchStation === 'unlock') {
+            if (weaponGrid) weaponGrid.style.display = '';
+            document.getElementById('armory-customizer')?.classList.add('hidden');
+            if (statsBar) statsBar.style.display = 'none';
+            if (weaponBar) weaponBar.style.display = 'none';
+            if (weaponsDiv) weaponsDiv.classList.add('hidden');
+            if (skillsDiv) skillsDiv.classList.add('hidden');
+            if (!commsPanel) {
+                commsPanel = document.createElement('div');
+                commsPanel.id = 'comms-panel';
+                wrapper.appendChild(commsPanel);
+            }
+            this.renderUnlockPanel(commsPanel, data, theme);
+            return;
+        }
+
         if (data.researchStation === 'comms') {
             if (weaponGrid) weaponGrid.style.display = '';
             document.getElementById('armory-customizer')?.classList.add('hidden');
@@ -1546,6 +1594,25 @@ class UIManager {
             button.style.display = theme.buttons.includes(button.id) ? '' : 'none';
         });
         if (puddleInfo) puddleInfo.style.display = data.researchStation === 'regeneration' ? '' : 'none';
+    }
+
+    renderUnlockPanel(panel, data, theme) {
+        panel.innerHTML = '';
+        panel.style.cssText = 'display:block; padding:16px; font-family:inherit;';
+        const color = theme.color;
+        const status = document.createElement('div');
+        status.style.cssText = `color:${color}; letter-spacing:2px; margin-bottom:14px; font-size:16px;`;
+        status.textContent = data.nodeUnlocked
+            ? (data.isFinalGate ? 'ZÁR FELOLDVA — A KIJÁRATI KAPU NYITVA. A FOLYOSÓ AZ EGYSZEMÉLYES MAGLIFTHEZ VEZET.' : 'ZÁR FELOLDVA — A KIJÁRATI KAPU NYITVA. A FOLYOSÓ A KÖVETKEZŐ SZEKTOR PÁLYALIFTJÉHEZ VEZET.')
+            : `${data.sector} SZEKTORZÁR AKTÍV — A NEXUS NODE VÉDELME LEKAPCSOLVA.`;
+        panel.appendChild(status);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.disabled = !!data.nodeUnlocked;
+        button.textContent = data.nodeUnlocked ? '> KORLÁTOZÁS FELOLDVA' : '> KORLÁTOZÁS FELOLDÁSA ÉS KAPU NYITÁSA';
+        button.style.cssText = `background:rgba(0,40,60,0.55); color:#cfefff; border:1px solid ${color}; padding:12px 14px; text-align:left; cursor:pointer; font:inherit; width:100%;`;
+        button.addEventListener('click', () => EventBus.emit('TRY_UNLOCK_NODE_EXIT'));
+        panel.appendChild(button);
     }
 
     applyLiftTerminalLayout() {
@@ -1746,10 +1813,12 @@ class UIManager {
             {
                 question: 'Mi vár rám a következő szinten?',
                 answer: () => {
-                    if (floor >= 100) return 'A Mag előtt állsz, ECHO. Nincs következő szint. Három Nexus Node választ el a KRONOS-tól.';
+                    if (floor >= 102) return 'A Mag előtt állsz, ECHO. Nincs következő szint.';
                     const next = getCampaignFloorInfo(floor + 1);
-                    return next.bossCount
-                        ? `A ${next.floor}. szinten szerverterem vár ${next.bossCount} Nexus Node-dal. Töltsd fel a készleteidet a liftben.`
+                    if (next.isCaveFloor) return 'A Mag barlangja külön helyiség: a 101. szint szerverterme mögötti kis szobában az egyszemélyes lift visz le. Három Nexus Node vár odalent.';
+                    if (next.isFinalGate) return 'A 101. szinten az utolsó szerverterem vár, de nem Node őrzi... hanem én. Gallagher. Ne habozz, ECHO.';
+                    return next.isSectorGate
+                        ? `A ${next.floor}. szinten szektorhatár vár: szerverterem ${next.nodeBossCount} Nexus Node-dal. A központi liftterminál ott zárolva lesz, csak a szerverterem mögötti folyosó visz tovább a következő szektor pályaliftjéhez.`
                         : `A ${next.floor}. szint a ${next.sector.name} szektorban van. Figyeld a fertőzés jeleit, és tartsd készen a fegyvered.`;
                 }
             },

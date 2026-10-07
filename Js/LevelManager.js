@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import EventBus from './EventBus.js';
-import { getCampaignFloorInfo, researchHubStations } from './Campaign.js';
+import { getCampaignFloorInfo, researchHubStations, researchNodeSection, nodeUnlockStation, sectorHallCenter, isInResearchNodeRoom } from './Campaign.js';
 
 class LevelManager {
     constructor() {
@@ -17,6 +17,10 @@ class LevelManager {
         this.targetElevatorSpeed = 0;
         this.wallTex = null;
         this.floorMaterial = null;
+        this.caveGroup = null;
+        this.caveCollisions = [];
+        this.cabinGroup = null;
+        this.cabinCenter = null;
         this.shaftWallMaterial = null;
         this.serverRoomGroup = null;
         this.sectorDressingGroups = {};
@@ -25,7 +29,16 @@ class LevelManager {
         this.researchHubGroup = null;
         this.researchHubCollisions = [];
         this.researchRoomLights = [];
+        this.nodeSectionGroup = null;
+        this.nodeTerminalGroup = null;
+        this.nodeStaticCollisions = [];
+        this.nodeDoors = [];
+        this.nodeLights = [];
+        this.nodeSectionActive = false;
+        this.finalPodRoomActive = false;
+        this.caveWorldOffset = 0;
         this.isResearchHubVisible = false;
+        this.isNodeSectionVisible = false;
         this.researchRoomsActive = false;
         this.lightBlinkTimer = 0;
         this.elevatorTransitTimer = 0;
@@ -52,9 +65,14 @@ class LevelManager {
         this.regenerationPod = null;
         this.terminalModelMixer = null;
         this.terminalModelAction = null;
+        this.terminalModelAnimations = [];
         this.terminalClosedTime = 2.7;
         this.terminalModelTime = this.terminalClosedTime;
         this.terminalModelTargetTime = this.terminalClosedTime;
+        this.sectorTerminalModelMixer = null;
+        this.sectorTerminalModelAction = null;
+        this.sectorTerminalModelTime = this.terminalClosedTime;
+        this.sectorTerminalModelTargetTime = this.terminalClosedTime;
         this.researchTerminalAnimations = [];
         this.podPowerLight = null;
         this.podRotor = null;
@@ -63,6 +81,11 @@ class LevelManager {
         this.podDoorPanels = [];
         this.podDoorProgress = 0;
         this.podDoorTarget = 0;
+        this.sectorPodDoorPanels = [];
+        this.sectorPodDoorProgress = 0;
+        this.sectorPodDoorTarget = 0;
+        this.sectorPodAnimationTime = 0;
+        this.isSectorPodActive = false;
 
     }
 
@@ -70,20 +93,37 @@ class LevelManager {
         if (this._eventsBound) return;
         this._eventsBound = true;
         EventBus.withOwner(this, () => {
-        EventBus.on('START_ELEVATOR_MOVE', () => this.startElevator());
+        EventBus.on('START_ELEVATOR_MOVE', (data) => this.startElevator(data));
         EventBus.on('STOP_ELEVATOR_MOVE', () => this.stopElevator());
         EventBus.on('OPEN_AIRLOCK_GATES', (data) => this.openDoors(data ? data.duration : 7.5));
         EventBus.on('CLOSE_AIRLOCK_GATES', (data) => this.closeDoors(data ? data.duration : 1.5));
         EventBus.on('TERMINAL_SESSION_ACTIVE', () => this.setTerminalActive(true));
         EventBus.on('TERMINAL_RESET', () => this.setTerminalActive(false));
-        EventBus.on('TERMINAL_OPEN', () => this.setTerminalModelOpen(true));
-        EventBus.on('TERMINAL_CLOSE', () => this.setTerminalModelOpen(false));
+        EventBus.on('TERMINAL_OPEN', (data) => this.setTerminalModelOpen(true, !!(data && data.isSectorPod)));
+        EventBus.on('TERMINAL_CLOSE', (data) => this.setTerminalModelOpen(false, !!(data && data.isSectorPod)));
         EventBus.on('RESEARCH_TERMINAL_OPEN', (data) => this.setResearchTerminalOpen(data.station, true));
         EventBus.on('RESEARCH_TERMINAL_CLOSE', (data) => this.setResearchTerminalOpen(data.station, false));
         EventBus.on('STERILIZATION_STEAM', (intensity) => this.setSterilizationSteam(intensity));
         EventBus.on('WAVE_STARTED', (data) => this.setCampaignFloor(data.wave));
+        EventBus.on('ELEVATOR_ARRIVED', (data) => {
+            if (data && getCampaignFloorInfo(data.wave).isCaveFloor) {
+                this.caveWorldOffset = -sectorHallCenter;
+                if (!this.caveGroup) this.buildCave();
+                this.setCaveShell(true);
+            }
+        });
         EventBus.on('CAMPAIGN_FLOOR_RESET', () => this.setCampaignFloor(1));
-        EventBus.on('RESEARCH_ROOMS_SET', (data) => this.setResearchRoomsActive(!!(data && data.active)));
+        EventBus.on('RESEARCH_ROOMS_SET', (data) => {
+            const active = !!(data && data.active);
+            this.setResearchRoomsActive(active);
+        });
+        EventBus.on('RESEARCH_NODE_SECTION_SET', (data) => this.setNodeSectionActive(!!(data && data.active), !!(data && data.isFinal)));
+        EventBus.on('NODE_GATE_SET', (data) => this.setNodeDoorOpen('gate', !!(data && data.open)));
+        EventBus.on('NODE_CLEARED', () => this.setNodeCleared());
+        EventBus.on('NODE_EXIT_UNLOCKED', () => {
+            this.setNodeDoorOpen('exit', true);
+            this.setSectorPodActive(true);
+        });
         });
     }
 
@@ -95,6 +135,7 @@ class LevelManager {
     init(scene, assetManager) {
         this.bindEvents();
         this.scene = scene;
+        const preInitChildren = new Set(scene.children);
         this.gatesGroup = new THREE.Group();
         this.gatesGroup.visible = false;
         this.scene.add(this.gatesGroup);
@@ -113,6 +154,7 @@ class LevelManager {
         this.isDoorsOpen = false;
         this.smokeTickTimer = 0.0;
         this.isElevatorMoving = false;
+        this.cabinCenter = null;
         this.elevatorSpeed = 0;
         this.targetElevatorSpeed = 0;
         this.lightBlinkTimer = 0;
@@ -591,7 +633,9 @@ class LevelManager {
                 corridorHitboxes,
                 corridorHitboxBackups: corridorHitboxes.map(box => box.clone()),
                 corridorLight,
-                isResearchDoor: isXAxis ? doorCenterX === 0 : doorCenterZ === 0
+                isResearchDoor: isXAxis ? doorCenterX === 0 : doorCenterZ === 0,
+                isNodeDoor: !isXAxis && doorCenterZ === 0 && dirSign === -1,
+                replaced: false
             };
 
             this.doors.push(doorObj);
@@ -671,6 +715,8 @@ class LevelManager {
             });
         });
 
+        this.createSectorArena(preInitChildren);
+
         console.log(`[KRONOS] LevelManager: Egységesített, folytonos -100. emeleti aknafalak (60m) és oszlopok kiépítve.`);
     }
 
@@ -734,6 +780,8 @@ class LevelManager {
         [-1, 1].forEach(direction => {
             const panel = new THREE.Mesh(new THREE.BoxGeometry(2.05, 3.42, 0.12), podDoorMaterial);
             panel.position.set(direction * 1.025, 1.95, 4.3);
+            panel.name = 'regeneration-pod-door';
+            panel.userData.doorDirection = direction;
             pod.add(panel);
             this.podDoorPanels.push({ mesh: panel, direction });
         });
@@ -750,6 +798,7 @@ class LevelManager {
         pod.add(ceilingRing);
 
         const rotor = new THREE.Group();
+        rotor.name = 'regeneration-pod-rotor';
         rotor.position.set(0, 4.12, 0);
         const rotorRing = new THREE.Mesh(new THREE.TorusGeometry(2.65, 0.075, 8, 40), inactiveGlow);
         rotorRing.rotation.x = Math.PI / 2;
@@ -763,10 +812,12 @@ class LevelManager {
         if (!terminalModel) {
             throw new Error('[KRONOS] The terminal model was not loaded before the regeneration pod was created.');
         }
+        terminalModel.mesh.name = 'regeneration-pod-terminal';
         terminalModel.mesh.scale.set(9.8 / 3.2, 1, 2);
         terminalModel.mesh.position.set(0, 0.26, -3.14);
         pod.add(terminalModel.mesh);
         if (terminalModel.animations.length > 0) {
+            this.terminalModelAnimations = terminalModel.animations;
             this.terminalModelMixer = new THREE.AnimationMixer(terminalModel.mesh);
             this.terminalModelAction = this.terminalModelMixer.clipAction(terminalModel.animations[0]);
             this.terminalModelAction.play();
@@ -788,16 +839,19 @@ class LevelManager {
             entryFrame.add(bar);
         });
         const entryIndicator = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.08, 0.08), inactiveGlow);
+        entryIndicator.name = 'regeneration-pod-entry-indicator';
         entryIndicator.position.set(0, 3.78, 4.29);
         entryFrame.add(entryIndicator);
         pod.add(entryFrame);
 
         const powerLight = new THREE.PointLight(0xff7b24, 1.1, 14, 2);
+        powerLight.name = 'regeneration-pod-power-light';
         powerLight.position.set(0, 3.6, 0);
         pod.add(powerLight);
         this.podPowerLight = powerLight;
         this.podGlowMaterials = { inactive: inactiveGlow, active: activeGlow };
         this.podEntryIndicator = entryIndicator;
+        pod.name = 'regeneration-pod';
         this.regenerationPod = pod;
         this.scene.add(pod);
         this.setTerminalActive(false);
@@ -815,6 +869,22 @@ class LevelManager {
         if (this.podRotor && this.podGlowMaterials) {
             this.podRotor.children[0].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
             this.podRotor.children[1].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
+        }
+        this.setSectorPodActive(isActive);
+    }
+
+    setSectorPodActive(isActive) {
+        this.isSectorPodActive = isActive;
+        if (this.sectorPodEntryIndicator && this.podGlowMaterials) {
+            this.sectorPodEntryIndicator.material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
+        }
+        if (this.sectorPodPowerLight) {
+            this.sectorPodPowerLight.color.setHex(isActive ? 0x00f5ff : 0xff7b24);
+            this.sectorPodPowerLight.intensity = isActive ? 2.2 : 0.85;
+        }
+        if (this.sectorPodRotor && this.podGlowMaterials) {
+            this.sectorPodRotor.children[0].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
+            this.sectorPodRotor.children[1].material = isActive ? this.podGlowMaterials.active : this.podGlowMaterials.inactive;
         }
     }
 
@@ -936,7 +1006,6 @@ class LevelManager {
         const floorMaterial = new THREE.MeshStandardMaterial({ color: 0xcfd8dc, metalness: 0.25, roughness: 0.6, emissive: 0x2a3338, emissiveIntensity: 0.6 });
         const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xe6eef1, metalness: 0.2, roughness: 0.55, emissive: 0x2c363a, emissiveIntensity: 0.55 });
         const panelMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const consoleMaterial = new THREE.MeshStandardMaterial({ color: 0x3a4850, metalness: 0.6, roughness: 0.35 });
 
         const group = new THREE.Group();
         group.visible = false;
@@ -976,67 +1045,9 @@ class LevelManager {
             add(new THREE.BoxGeometry(0.15, 0.04, roomDepth - 1), stripMaterial, roomHalfWidth - 0.8, 0.14, -roomCenter);
 
             const consoleZ = -roomEnd + 1.3;
-            const consoleBase = add(new THREE.BoxGeometry(2.2, 1.6, 1.2), consoleMaterial, 0, 0.8, consoleZ, true);
-            const terminalModel = assetManager && typeof assetManager.cloneModel === 'function' ? assetManager.cloneModel('terminal') : null;
-            if (terminalModel) {
-                consoleBase.visible = false;
-                const model = terminalModel.mesh;
-                room.add(model);
-                const mixer = terminalModel.animations.length
-                    ? new THREE.AnimationMixer(model)
-                    : null;
-                const action = mixer
-                    ? mixer.clipAction(terminalModel.animations[0])
-                    : null;
-                if (action) {
-                    action.setLoop(THREE.LoopOnce, 1);
-                    action.clampWhenFinished = true;
-                    action.play();
-                    action.paused = true;
-                    action.time = this.terminalClosedTime;
-                    mixer.update(0);
-                } else {
-                    console.warn(`[KRONOS] Research terminal "${station.id}" has no animation clips.`);
-                }
-                this.researchTerminalAnimations.push({
-                    station: station.id,
-                    mixer,
-                    action,
-                    time: this.terminalClosedTime,
-                    targetTime: this.terminalClosedTime
-                });
-                model.updateMatrixWorld(true);
-                const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
-                const scale = 2.4 / Math.max(size.y, 0.001);
-                model.scale.multiplyScalar(scale);
-                model.position.set(0, 0, consoleZ);
-                room.updateMatrixWorld(true);
-                const fitted = new THREE.Box3().setFromObject(model);
-                const center = fitted.getCenter(new THREE.Vector3());
-                room.worldToLocal(center);
-                model.position.x -= center.x;
-                model.position.y -= new THREE.Box3().setFromObject(model).min.y;
-            } else {
-                consoleBase.visible = true;
-                const screen = add(new THREE.BoxGeometry(2.6, 1.2, 0.12), new THREE.MeshBasicMaterial({ color }), 0, 1.7, consoleZ - 0.25);
-                screen.rotation.x = -0.25;
-            }
+            this.addResearchConsole(room, add, assetManager, station, color, consoleZ);
 
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 128;
-            const context = canvas.getContext('2d');
-            context.fillStyle = '#0b1418';
-            context.fillRect(0, 0, 512, 128);
-            context.strokeStyle = `#${station.color.toString(16).padStart(6, '0')}`;
-            context.lineWidth = 8;
-            context.strokeRect(4, 4, 504, 120);
-            context.fillStyle = '#e8f6f6';
-            context.font = 'bold 40px monospace';
-            context.textAlign = 'center';
-            context.textBaseline = 'middle';
-            context.fillText(station.label, 256, 64);
-            add(new THREE.PlaneGeometry(5.5, 1.35), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), toneMapped: false }), 0, 4.4, -roomEnd - 0.03);
+            add(this.createLabelGeometry(5.5, 1.35), this.createLabelMaterial(station.label, station.color), 0, 4.4, -roomEnd - 0.03);
 
             for (const depth of [roomStart + 4, roomStart + 12]) {
                 const light = new THREE.PointLight(0xf2fbff, 0, 24, 1.6);
@@ -1049,18 +1060,431 @@ class LevelManager {
 
         group.updateMatrixWorld(true);
         for (const mesh of blocking) this.researchHubCollisions.push(new THREE.Box3().setFromObject(mesh));
+        this.createNodeSection(assetManager);
+    }
+
+    createLabelGeometry(width, height) {
+        return new THREE.PlaneGeometry(width, height);
+    }
+
+    createLabelMaterial(label, colorHex) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 128;
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#0b1418';
+        context.fillRect(0, 0, 512, 128);
+        context.strokeStyle = `#${colorHex.toString(16).padStart(6, '0')}`;
+        context.lineWidth = 8;
+        context.strokeRect(4, 4, 504, 120);
+        context.fillStyle = '#e8f6f6';
+        context.font = 'bold 40px monospace';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(label, 256, 64);
+        return new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), toneMapped: false });
+    }
+
+    addResearchConsole(room, add, assetManager, station, color, consoleZ) {
+        const consoleMaterial = new THREE.MeshStandardMaterial({ color: 0x3a4850, metalness: 0.6, roughness: 0.35 });
+        const consoleBase = add(new THREE.BoxGeometry(2.2, 1.6, 1.2), consoleMaterial, 0, 0.8, consoleZ, true);
+        const terminalModel = assetManager && typeof assetManager.cloneModel === 'function' ? assetManager.cloneModel('terminal') : null;
+        if (terminalModel) {
+            consoleBase.visible = false;
+            const model = terminalModel.mesh;
+            room.add(model);
+            const mixer = terminalModel.animations.length
+                ? new THREE.AnimationMixer(model)
+                : null;
+            const action = mixer
+                ? mixer.clipAction(terminalModel.animations[0])
+                : null;
+            if (action) {
+                action.setLoop(THREE.LoopOnce, 1);
+                action.clampWhenFinished = true;
+                action.play();
+                action.paused = true;
+                action.time = this.terminalClosedTime;
+                mixer.update(0);
+            } else {
+                console.warn(`[KRONOS] Research terminal "${station.id}" has no animation clips.`);
+            }
+            this.researchTerminalAnimations.push({
+                station: station.id,
+                mixer,
+                action,
+                time: this.terminalClosedTime,
+                targetTime: this.terminalClosedTime
+            });
+            model.updateMatrixWorld(true);
+            const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+            const scale = 2.4 / Math.max(size.y, 0.001);
+            model.scale.multiplyScalar(scale);
+            model.position.set(0, 0, consoleZ);
+            room.updateMatrixWorld(true);
+            const fitted = new THREE.Box3().setFromObject(model);
+            const center = fitted.getCenter(new THREE.Vector3());
+            room.worldToLocal(center);
+            model.position.x -= center.x;
+            model.position.y -= new THREE.Box3().setFromObject(model).min.y;
+        } else {
+            consoleBase.visible = true;
+            const screen = add(new THREE.BoxGeometry(2.6, 1.2, 0.12), new THREE.MeshBasicMaterial({ color }), 0, 1.7, consoleZ - 0.25);
+            screen.rotation.x = -0.25;
+        }
+    }
+
+    createNodeSection(assetManager) {
+        const S = researchNodeSection;
+        const wallHeight = 6;
+        const t = 0.4;
+        const doorHalf = S.corridorHalfWidth;
+        const doorHeight = 5.2;
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b3238, metalness: 0.45, roughness: 0.6, emissive: 0x0b1216, emissiveIntensity: 0.6 });
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a444c, metalness: 0.35, roughness: 0.6, emissive: 0x10181c, emissiveIntensity: 0.6 });
+        const rackMat = new THREE.MeshStandardMaterial({ color: 0x1c2328, metalness: 0.7, roughness: 0.4 });
+        const accentMat = new THREE.MeshBasicMaterial({ color: 0x00d9ff });
+        const warnMat = new THREE.MeshBasicMaterial({ color: 0xff3048 });
+        const doorMat = new THREE.MeshStandardMaterial({ color: 0x555f66, metalness: 0.8, roughness: 0.35, emissive: 0x220508, emissiveIntensity: 0.8 });
+
+        const group = new THREE.Group();
+        group.visible = false;
+        this.nodeSectionGroup = group;
+        this.nodeStaticCollisions = [];
+        this.nodeDoors = [];
+        this.nodeLights = [];
+        this.scene.add(group);
+
+        const blocking = [];
+        const place = (parent, geometry, material, x, y, z, blocks = false) => {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x, y, z);
+            parent.add(mesh);
+            if (blocks) blocking.push(mesh);
+            return mesh;
+        };
+        const add = (w, h, d, material, x, y, z, blocks = false) => place(group, new THREE.BoxGeometry(w, h, d), material, x, y, z, blocks);
+        const centerOf = (d0, d1) => -(d0 + d1) / 2;
+
+        // Átjáró: padló, mennyezet és két oldalfal két távolság között
+        const hall = (d0, d1, half) => {
+            const len = d1 - d0;
+            const cx = centerOf(d0, d1);
+            add(len, 0.2, half * 2, floorMat, cx, 0.02, 0);
+            add(len, 0.3, half * 2 + t * 2, wallMat, cx, wallHeight, 0);
+            add(len, wallHeight, t, wallMat, cx, wallHeight / 2, -half - t / 2, true);
+            add(len, wallHeight, t, wallMat, cx, wallHeight / 2, half + t / 2, true);
+            add(len - 1, 0.04, 0.15, accentMat, cx, 0.14, -half + 0.8);
+            add(len - 1, 0.04, 0.15, accentMat, cx, 0.14, half - 0.8);
+        };
+        // Keresztfal ajtónyílással
+        const dividerWall = (d, half) => {
+            const sideWidth = half + t - doorHalf;
+            for (const side of [-1, 1]) {
+                add(t, wallHeight, sideWidth, wallMat, -d, wallHeight / 2, side * (doorHalf + sideWidth / 2), true);
+            }
+            add(t, wallHeight - doorHeight, doorHalf * 2, wallMat, -d, doorHeight + (wallHeight - doorHeight) / 2, 0);
+        };
+        const makeDoor = (id, d, mat) => {
+            const mesh = add(0.6, doorHeight, doorHalf * 2, mat, -d, doorHeight / 2, 0);
+            mesh.updateMatrixWorld(true);
+            this.nodeDoors.push({
+                id, mesh,
+                box: new THREE.Box3().setFromObject(mesh),
+                progress: 0,
+                target: 0,
+                closedY: doorHeight / 2,
+                openY: doorHeight / 2 + doorHeight
+            });
+        };
+
+        hall(S.corridorStart, S.gateDistance, doorHalf);
+        hall(S.gateDistance, S.roomEndDistance, S.roomHalfWidth);
+        hall(S.roomEndDistance, S.exitCorridorEnd, doorHalf);
+        hall(S.exitCorridorEnd, S.liftEndDistance, doorHalf);
+        dividerWall(S.gateDistance, S.roomHalfWidth);
+        dividerWall(S.roomEndDistance, S.roomHalfWidth);
+        makeDoor('gate', S.gateDistance, doorMat);
+        makeDoor('exit', S.roomEndDistance, doorMat);
+
+        // Szerver állványok a terem két oldalán (a közepe szabad a harchoz)
+        for (let d = 52; d <= 72; d += 5) {
+            for (const side of [-1, 1]) {
+                const z = side * (S.roomHalfWidth - 0.9);
+                add(2.6, 3.6, 1.4, rackMat, -d, 1.8, z, true);
+                for (let row = 0; row < 4; row++) {
+                    add(2.2, 0.06, 0.05, row % 2 ? accentMat : warnMat, -d, 0.8 + row * 0.7, z - side * 0.73);
+                }
+            }
+        }
+        const pedestal = place(group, new THREE.CylinderGeometry(3.2, 3.4, 0.15, 32), floorMat, -S.bossDistance, 0.1, 0);
+        pedestal.receiveShadow = true;
+        const ring = place(group, new THREE.RingGeometry(2.7, 3.0, 48), warnMat, -S.bossDistance, 0.2, 0);
+        ring.rotation.x = -Math.PI / 2;
+
+        // Kommunikációs terminál a szerverterem nyugati falánál (csak a Node legyőzése után látszik)
+        const terminalRoot = new THREE.Group();
+        terminalRoot.position.set(-S.terminalDistance, 0, S.terminalZ);
+        terminalRoot.rotation.y = Math.PI / 2;
+        terminalRoot.visible = false;
+        group.add(terminalRoot);
+        this.nodeTerminalGroup = terminalRoot;
+        const terminalAdd = (geometry, material, x, y, z, blocks = false) => place(terminalRoot, geometry, material, x, y, z, blocks);
+        this.addResearchConsole(terminalRoot, terminalAdd, assetManager, nodeUnlockStation, new THREE.Color(nodeUnlockStation.color), 0);
+        place(terminalRoot, this.createLabelGeometry(4.2, 1.05), this.createLabelMaterial(nodeUnlockStation.label, nodeUnlockStation.color), 0, 4.2, -1.27);
+
+        // Feliratok
+        const signs = [
+            { label: 'SZERVERTEREM // NODE', color: 0xff3048, d: S.gateDistance - t / 2 - 0.02, y: 5.6, w: 4.4, h: 0.55, face: Math.PI / 2 },
+            { label: 'KIJÁRAT // ÚJ SZEKTOR', color: 0x00d9ff, d: S.roomEndDistance - t / 2 - 0.02, y: 5.6, w: 4.4, h: 0.55, face: Math.PI / 2 },
+            { label: 'KÖVETKEZŐ SZEKTOR // PÁLYALIFT', color: 0x00ff99, d: S.liftEndDistance - 3, y: 4.2, w: 4.4, h: 1.1, face: Math.PI / 2 }
+        ];
+        this.nodeSigns = [];
+        for (const sign of signs) {
+            const mesh = place(group, this.createLabelGeometry(sign.w, sign.h), this.createLabelMaterial(sign.label, sign.color), -sign.d, sign.y, 0);
+            mesh.rotation.y = sign.face;
+            this.nodeSigns.push({ mesh, normal: mesh.material });
+        }
+        this.nodeSigns[0].final = this.createLabelMaterial('SZERVERTEREM // GALLAGHER', 0x66aaff);
+        this.nodeSigns[1].final = this.createLabelMaterial('KIJÁRAT // MAGLIFT', 0x00d9ff);
+        this.nodeSigns[2].final = this.createLabelMaterial('MAG // EGYSZEMÉLYES LIFT', 0xff3048);
+
+        const lightSpots = [
+            { d: 36, color: 0xf2fbff }, { d: 54, color: 0xdff4ff }, { d: 66, color: 0xffd0d6 },
+            { d: 72, color: 0xf2fbff }, { d: 86, color: 0xf2fbff }, { d: 99, color: 0xcfffe8 }
+        ];
+        for (const spot of lightSpots) {
+            const light = new THREE.PointLight(spot.color, 0, 24, 1.6);
+            light.position.set(-spot.d, wallHeight - 0.8, 0);
+            this.scene.add(light);
+            this.nodeLights.push(light);
+        }
+
+        group.updateMatrixWorld(true);
+        for (const mesh of blocking) this.nodeStaticCollisions.push(new THREE.Box3().setFromObject(mesh));
+    }
+
+    // A következő szektor pályaliftje: a központi aréna fizikai másolata a szerverfolyosó végén
+    createSectorArena(preInitChildren) {
+        const offsetX = -sectorHallCenter;
+        const skip = new Set([this.gatesGroup, this.serverRoomGroup, this.researchHubGroup, this.nodeSectionGroup, this.caveGroup, ...Object.values(this.sectorDressingGroups)]);
+        const arena = new THREE.Group();
+        this.arenaShellItems = [];
+        arena.position.set(offsetX, 0, 0);
+        for (const child of this.scene.children) {
+            if (preInitChildren.has(child) || skip.has(child) || child.isLight) continue;
+            // A keleti középső zsilip a szerverfolyosóra nyílik, ott nem lehet fedőlap
+            if (child.isMesh && child.position.x === 25 && child.position.z === 0 && child.geometry.type === 'PlaneGeometry') continue;
+            const copy = child.clone(true);
+            let hasFloor = false;
+            child.traverse(o => { if (o.isMesh && o.material === this.floorMaterial) hasFloor = true; });
+            if (child !== this.regenerationPod && !hasFloor) this.arenaShellItems.push(child);
+            if (child === this.regenerationPod) {
+                this.sectorRegenerationPod = copy;
+                copy.traverse(object => {
+                    if (object.name === 'regeneration-pod-door') {
+                        this.sectorPodDoorPanels.push({ mesh: object, direction: object.userData.doorDirection });
+                    } else if (object.name === 'regeneration-pod-entry-indicator') {
+                        this.sectorPodEntryIndicator = object;
+                    } else if (object.name === 'regeneration-pod-power-light') {
+                        this.sectorPodPowerLight = object;
+                    } else if (object.name === 'regeneration-pod-rotor') {
+                        this.sectorPodRotor = object;
+                    } else if (object.name === 'regeneration-pod-terminal') {
+                        this.sectorPodTerminalModel = object;
+                        if (this.terminalModelAnimations.length > 0) {
+                            this.sectorTerminalModelMixer = new THREE.AnimationMixer(object);
+                            this.sectorTerminalModelAction = this.sectorTerminalModelMixer.clipAction(this.terminalModelAnimations[0]);
+                            this.sectorTerminalModelAction.play();
+                            this.sectorTerminalModelAction.paused = true;
+                            this.sectorTerminalModelAction.time = this.terminalClosedTime;
+                            this.sectorTerminalModelMixer.update(0);
+                        } else {
+                            console.warn('[KRONOS] Sector lift terminal model has no animation clips.');
+                        }
+                    }
+                });
+                this.sectorPodVisibility = new Map();
+                copy.traverse(object => this.sectorPodVisibility.set(object, object.visible));
+            }
+            copy.traverse(object => {
+                if (!object.isMesh) return;
+                if (object.material === this.floorMaterial) {
+                    object.material = this.floorMaterial.clone();
+                    object.material.color.setHex(0xb99a70);
+                } else if (object.material === this.shaftWallMaterial) {
+                    object.material = this.shaftWallMaterial.clone();
+                    object.material.color.setHex(0xd19a58);
+                }
+            });
+            const lights = [];
+            copy.traverse(o => { if (o.isLight) lights.push(o); });
+            lights.forEach(l => {
+                if (l !== this.sectorPodPowerLight && l.parent) l.parent.remove(l);
+            });
+            copy.visible = true;
+            arena.add(copy);
+        }
+        this.nodeSectionGroup.add(arena);
+
+        const doorMat = new THREE.MeshStandardMaterial({ color: 0x555f66, metalness: 0.8, roughness: 0.35, emissive: 0x220508, emissiveIntensity: 0.6 });
+        const slabW = 6.3, slabH = 5.3, slabT = 0.35;
+        const gates = [];
+        for (const c of [-14, 0, 14]) {
+            gates.push({ x: c, z: -26, w: slabW, d: slabT }, { x: c, z: 26, w: slabW, d: slabT }, { x: -26, z: c, w: slabT, d: slabW });
+            if (c !== 0) gates.push({ x: 26, z: c, w: slabT, d: slabW });
+        }
+        for (const g of gates) {
+            const slab = new THREE.Mesh(new THREE.BoxGeometry(g.w, slabH, g.d), doorMat);
+            slab.position.set(g.x, slabH / 2, g.z);
+            arena.add(slab);
+        }
+        arena.updateMatrixWorld(true);
+        this.sectorArenaGroup = arena;
+        this.sectorArenaItems = arena.children.slice();
+        this.sectorArenaCollisions = [];
+
+        const corridorBoxes = new Set();
+        for (const door of this.doors) door.corridorHitboxes.forEach(box => corridorBoxes.add(box));
+        const shift = new THREE.Vector3(offsetX, 0, 0);
+        for (const box of this.wallHitboxes) {
+            if (corridorBoxes.has(box) || box.isEmpty()) continue;
+            this.sectorArenaCollisions.push(box.clone().translate(shift));
+        }
+        for (const g of gates) {
+            const box = new THREE.Box3(
+                new THREE.Vector3(g.x - g.w / 2, 0, g.z - g.d / 2).add(shift),
+                new THREE.Vector3(g.x + g.w / 2, slabH, g.z + g.d / 2).add(shift)
+            );
+            this.sectorArenaCollisions.push(box);
+        }
+        this.createFinalPodRoom(offsetX, this.floorMaterial, shift);
+        for (const [dx, dz] of [[-12, -12], [-12, 12], [12, -12], [12, 12]]) {
+            const light = new THREE.PointLight(0xdff4ff, 0, 34, 1.4);
+            light.position.set(offsetX + dx, 5, dz);
+            this.scene.add(light);
+            this.nodeLights.push(light);
+        }
+    }
+
+    // A 101. szint szerverterme után nem aréna, hanem egy kis szoba áll az egyszemélyes liftel
+    createFinalPodRoom(offsetX, floorMat, shift) {
+        const room = new THREE.Group();
+        room.visible = false;
+        room.position.set(offsetX, 0, 0);
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a4f56, metalness: 0.4, roughness: 0.6, emissive: 0x14100d, emissiveIntensity: 0.6 });
+        const xMin = -8, xMax = 25, halfZ = 9, h = 6, t = 0.5;
+        const boxes = [];
+        const part = (w, hh, d, mat, x, y, z, solid = true) => {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), mat);
+            mesh.position.set(x, y, z);
+            room.add(mesh);
+            if (solid) boxes.push(new THREE.Box3(
+                new THREE.Vector3(x - w / 2, 0, z - d / 2).add(shift),
+                new THREE.Vector3(x + w / 2, hh, z + d / 2).add(shift)
+            ));
+        };
+        const cx = (xMin + xMax) / 2, len = xMax - xMin;
+        part(len, 0.2, halfZ * 2, floorMat ? floorMat.clone() : wallMat, cx, -0.1, 0, false);
+        part(len, 0.3, halfZ * 2, wallMat, cx, h + 0.15, 0, false);
+        part(len, h, t, wallMat, cx, h / 2, -halfZ - t / 2);
+        part(len, h, t, wallMat, cx, h / 2, halfZ + t / 2);
+        part(t, h, halfZ * 2 + t * 2, wallMat, xMin - t / 2, h / 2, 0);
+        const gap = researchNodeSection.corridorHalfWidth;
+        const side = halfZ - gap;
+        part(t, h, side, wallMat, xMax + t / 2, h / 2, gap + side / 2);
+        part(t, h, side, wallMat, xMax + t / 2, h / 2, -gap - side / 2);
+        const light = new THREE.PointLight(0xffd9a8, 0, 22, 1.4);
+        light.position.set(offsetX + 12, 5, 0);
+        this.scene.add(light);
+        this.nodeLights.push(light);
+        this.nodeSectionGroup.add(room);
+        this.finalPodRoom = room;
+        const podCenterX = offsetX;
+        for (const box of this.sectorArenaCollisions) {
+            const c = box.getCenter(new THREE.Vector3());
+            if (Math.abs(c.x - podCenterX) < 6 && Math.abs(c.z) < 6) boxes.push(box);
+        }
+        this.finalPodRoomCollisions = boxes;
+    }
+
+    setNodeSectionActive(isActive, isFinal = false) {
+        if (this.nodeSectionActive === isActive && !isActive) return;
+        this.nodeSectionActive = isActive;
+        this.finalPodRoomActive = isActive && isFinal;
+        if (this.sectorArenaItems) {
+            for (const item of this.sectorArenaItems) item.visible = !this.finalPodRoomActive;
+        }
+        this.setFinalSectorPodDisplay(this.finalPodRoomActive);
+        if (this.finalPodRoom) this.finalPodRoom.visible = this.finalPodRoomActive;
+        if (this.finalPodRoomActive) this.showSingleCabin(-sectorHallCenter, 0);
+        else if (!this.isElevatorMoving) this.hideSingleCabin();
+        if (this.nodeSigns) {
+            for (const sign of this.nodeSigns) sign.mesh.material = this.finalPodRoomActive ? sign.final : sign.normal;
+        }
+        for (const door of this.nodeDoors) {
+            door.progress = 0;
+            door.target = 0;
+            door.mesh.position.y = door.closedY;
+            door.mesh.visible = true;
+        }
+        if (this.nodeTerminalGroup) this.nodeTerminalGroup.visible = false;
+        this.setSectorPodActive(false);
+        this.applyReplacedDoors();
+    }
+
+    setFinalSectorPodDisplay(isFinal) {
+        if (!this.sectorRegenerationPod || !this.sectorPodVisibility) return;
+        if (!isFinal) {
+            for (const [object, visible] of this.sectorPodVisibility) object.visible = visible;
+            return;
+        }
+        const visibleObjects = new Set();
+        for (let object = this.sectorPodTerminalModel; object; object = object.parent) {
+            visibleObjects.add(object);
+            if (object === this.sectorRegenerationPod) break;
+        }
+        this.sectorRegenerationPod.traverse(object => {
+            object.visible = visibleObjects.has(object);
+        });
+    }
+
+    setNodeDoorOpen(id, isOpen) {
+        const door = this.nodeDoors.find(entry => entry.id === id);
+        if (door) door.target = isOpen ? 1 : 0;
+    }
+
+    setNodeCleared() {
+        if (!this.nodeSectionActive) return;
+        this.setNodeDoorOpen('gate', true);
+        if (this.nodeTerminalGroup) this.nodeTerminalGroup.visible = true;
+    }
+
+    updateNodeDoors(delta) {
+        for (const door of this.nodeDoors) {
+            if (door.progress === door.target) continue;
+            door.progress = THREE.MathUtils.damp(door.progress, door.target, 3, delta);
+            if (Math.abs(door.progress - door.target) < 0.005) door.progress = door.target;
+            door.mesh.position.y = door.closedY + (door.openY - door.closedY) * door.progress;
+            door.mesh.visible = door.progress < 0.99;
+        }
     }
 
     setResearchRoomsActive(isActive) {
         if (this.researchRoomsActive === isActive) return;
         this.researchRoomsActive = isActive;
-        this.isResearchHubVisible = isActive;
+        this.applyReplacedDoors();
+    }
+
+    // A kapuk mögötti alap folyosót az R&D szoba vagy a szerverfolyosó váltja ki
+    applyReplacedDoors() {
         for (const door of this.doors) {
-            if (!door.isResearchDoor) continue;
-            for (const part of door.corridorParts) part.visible = !isActive;
-            door.corridorLight.disabled = isActive;
+            const replaced = (this.researchRoomsActive && door.isResearchDoor) || (this.nodeSectionActive && door.isNodeDoor);
+            door.replaced = replaced;
+            for (const part of door.corridorParts) part.visible = !replaced;
+            door.corridorLight.disabled = replaced;
             door.corridorHitboxes.forEach((box, index) => {
-                if (isActive) box.makeEmpty();
+                if (replaced) box.makeEmpty();
                 else box.copy(door.corridorHitboxBackups[index]);
             });
         }
@@ -1068,24 +1492,168 @@ class LevelManager {
     }
 
     syncResearchRoomVisibility() {
-        const visible = this.researchRoomsActive && !!this.gatesGroup && this.gatesGroup.visible;
-        if (this.researchHubGroup) this.researchHubGroup.visible = visible;
-        this.isResearchHubVisible = visible;
-        for (const light of this.researchRoomLights) light.intensity = visible ? 2.4 : 0;
+        const gatesVisible = !!this.gatesGroup && this.gatesGroup.visible;
+        const hubVisible = this.researchRoomsActive && gatesVisible;
+        const nodeVisible = this.nodeSectionActive && gatesVisible;
+        if (this.researchHubGroup) this.researchHubGroup.visible = hubVisible;
+        if (this.nodeSectionGroup) this.nodeSectionGroup.visible = nodeVisible;
+        this.isResearchHubVisible = hubVisible;
+        this.isNodeSectionVisible = nodeVisible;
+        for (const light of this.researchRoomLights) light.intensity = hubVisible ? 2.4 : 0;
+        for (const light of this.nodeLights) light.intensity = nodeVisible ? 2.4 : 0;
+    }
+
+    showSingleCabin(x, z) {
+        if (!this.cabinGroup) {
+            const group = new THREE.Group();
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x2b2f33, metalness: 0.8, roughness: 0.4 });
+            const glowMat = new THREE.MeshBasicMaterial({ color: 0xff3048 });
+            const half = 1.25;
+            for (const sx of [-1, 1]) {
+                for (const sz of [-1, 1]) {
+                    const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 3.2, 0.12), frameMat);
+                    post.position.set(sx * half, 1.6, sz * half);
+                    group.add(post);
+                }
+            }
+            for (const y of [0.05, 3.2]) {
+                const ring = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.12, 0.1, half * 2 + 0.12), frameMat);
+                ring.position.y = y;
+                group.add(ring);
+            }
+            for (const side of [-1, 1]) {
+                for (const axis of ['x', 'z']) {
+                    const bar = new THREE.Mesh(new THREE.BoxGeometry(axis === 'x' ? half * 2 : 0.05, 0.05, axis === 'x' ? 0.05 : half * 2), glowMat);
+                    bar.position.set(axis === 'x' ? 0 : side * half, 1.0, axis === 'x' ? side * half : 0);
+                    group.add(bar);
+                }
+            }
+            const light = new THREE.PointLight(0xff3048, 1.2, 8);
+            light.position.y = 2.6;
+            group.add(light);
+            this.cabinGroup = group;
+            this.scene.add(group);
+        }
+        this.cabinGroup.position.set(x, 0, z);
+        this.cabinGroup.visible = true;
+        this.cabinCenter = { x, z };
+    }
+
+    hideSingleCabin() {
+        if (this.cabinGroup) this.cabinGroup.visible = false;
+        this.cabinCenter = null;
+    }
+
+    buildCave() {
+        const group = new THREE.Group();
+        group.position.x = this.caveWorldOffset;
+        const rockMat = new THREE.MeshStandardMaterial({ color: 0x3a2a24, roughness: 1, metalness: 0, emissive: 0x2a0905, emissiveIntensity: 0.6, flatShading: true });
+        const collisions = [];
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(70, 70),
+            new THREE.MeshStandardMaterial({ color: 0x33241d, roughness: 1, side: THREE.DoubleSide })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = -0.02;
+        group.add(ground);
+        const spots = [];
+        for (const sx of [-1, 1]) {
+            for (const sz of [-1, 1]) {
+                spots.push([7 * sx, 7 * sz], [20 * sx, 7 * sz], [7 * sx, 20 * sz], [20 * sx, 20 * sz]);
+            }
+        }
+        spots.forEach(([x, z], i) => {
+            const radius = 1.0 + (i % 3) * 0.3;
+            const height = 2.8 + (i % 4) * 0.9;
+            const rock = new THREE.Mesh(new THREE.ConeGeometry(radius, height, 7), rockMat);
+            rock.position.set(x, height / 2, z);
+            rock.rotation.y = i * 0.9;
+            group.add(rock);
+            const reach = radius * 0.75;
+            collisions.push(new THREE.Box3(
+                new THREE.Vector3(x - reach + this.caveWorldOffset, 0, z - reach),
+                new THREE.Vector3(x + reach + this.caveWorldOffset, 3, z + reach)
+            ));
+        });
+        for (const [x, z] of [[-10, -10], [10, -10], [-10, 10], [10, 10]]) {
+            const glow = new THREE.PointLight(0xff4a1a, 2.2, 22);
+            glow.position.set(x, 2.5, z);
+            group.add(glow);
+        }
+        const walls = new THREE.Group();
+        walls.visible = false;
+        const wallRock = new THREE.MeshStandardMaterial({ color: 0x2a1a15, roughness: 1, metalness: 0, emissive: 0x1c0803, emissiveIntensity: 0.7, flatShading: true });
+        let n = 0;
+        for (let v = -26; v <= 26; v += 3.2) {
+            for (const [x, z] of [[v, -26.5], [v, 26.5], [-26.5, v], [26.5, v]]) {
+                const height = 7 + (n++ % 4) * 1.6;
+                const rock = new THREE.Mesh(new THREE.ConeGeometry(2.4 + (n % 3) * 0.4, height, 6), wallRock);
+                rock.position.set(x, height / 2 - 0.2, z);
+                rock.rotation.y = n * 1.3;
+                walls.add(rock);
+                const reach = 2.2;
+                collisions.push(new THREE.Box3(
+                    new THREE.Vector3(x - reach, 0, z - reach).add(new THREE.Vector3(this.caveWorldOffset, 0, 0)),
+                    new THREE.Vector3(x + reach, height, z + reach).add(new THREE.Vector3(this.caveWorldOffset, 0, 0))
+                ));
+            }
+        }
+        const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(70, 70), new THREE.MeshStandardMaterial({ color: 0x120a07, roughness: 1, side: THREE.DoubleSide }));
+        ceiling.rotation.x = Math.PI / 2;
+        ceiling.position.y = 9;
+        walls.add(ceiling);
+        group.add(walls);
+        this.caveWalls = walls;
+        group.visible = false;
+        this.scene.add(group);
+        this.caveGroup = group;
+        this.caveCollisions = collisions;
+    }
+
+    // A barlang külön helyiség: a lift aknaburkolata (falak, kapuk, zsilipek) eltűnik, csak a talaj marad
+    setCaveShell(isOn) {
+        this.caveShellHidden = isOn;
+        this.caveWorldOffset = isOn ? -sectorHallCenter : 0;
+        if (this.caveGroup) this.caveGroup.position.x = this.caveWorldOffset;
+        if (isOn) {
+            this.activeSectorPropCollisions = this.caveCollisions;
+            for (const item of this.sectorArenaItems || []) item.visible = false;
+        }
+        if (this.caveWalls) this.caveWalls.visible = isOn;
+        if (!isOn) {
+            for (const item of this.arenaShellItems || []) item.visible = true;
+            if (this.gatesGroup) this.gatesGroup.visible = this.isDoorsOpen;
+        }
+        this.enforceCaveShell();
+    }
+
+    enforceCaveShell() {
+        if (!this.caveShellHidden) return;
+        for (const item of this.arenaShellItems || []) item.visible = false;
+        if (this.gatesGroup) this.gatesGroup.visible = false;
     }
 
     setCampaignFloor(floor) {
         const info = getCampaignFloorInfo(floor);
-        const floorTint = info.sector.id === 'alpha' ? 0xd4e2da : info.sector.id === 'beta' ? 0xb99a70 : 0xffffff;
-        const wallTint = info.sector.id === 'alpha' ? 0xc8e2d8 : info.sector.id === 'beta' ? 0xd19a58 : 0xffffff;
+        if (!info.isCaveFloor && this.caveShellHidden) this.setCaveShell(false);
+        this.caveWorldOffset = info.isCaveFloor ? -sectorHallCenter : 0;
+        if (info.isCaveFloor && !this.caveGroup) this.buildCave();
+        if (this.caveGroup) this.caveGroup.position.x = this.caveWorldOffset;
+        if (this.caveGroup) this.caveGroup.visible = info.isCaveFloor;
+        if (this.scene && this.scene.fog) {
+            if (this.defaultFogColor === undefined) this.defaultFogColor = this.scene.fog.color.getHex();
+            this.scene.fog.color.setHex(info.isCaveFloor ? 0x1a0805 : this.defaultFogColor);
+        }
+        const floorTint = info.isCaveFloor ? 0x6a5248 : info.sector.id === 'alpha' ? 0xd4e2da : info.sector.id === 'beta' ? 0xb99a70 : 0xffffff;
+        const wallTint = info.isCaveFloor ? 0x7a5a4a : info.sector.id === 'alpha' ? 0xc8e2d8 : info.sector.id === 'beta' ? 0xd19a58 : 0xffffff;
         if (this.floorMaterial) this.floorMaterial.color.setHex(floorTint);
         if (this.shaftWallMaterial) this.shaftWallMaterial.color.setHex(wallTint);
         for (const [sectorId, group] of Object.entries(this.sectorDressingGroups)) {
-            group.visible = sectorId === info.sector.id;
+            group.visible = !info.isCaveFloor && sectorId === info.sector.id;
         }
-        this.activeSectorPropCollisions = this.sectorPropCollisions[info.sector.id] || [];
+        this.activeSectorPropCollisions = info.isCaveFloor ? this.caveCollisions : (this.sectorPropCollisions[info.sector.id] || []);
         if (this.serverRoomGroup) {
-            this.serverRoomGroup.visible = info.bossCount > 0;
+            this.serverRoomGroup.visible = info.bossCount > 0 && !info.isCaveFloor;
             this.serverRoomGroup.traverse((object) => {
                 if (object.isPointLight) {
                     object.color.setHex(info.sector.color);
@@ -1103,7 +1671,14 @@ class LevelManager {
         if (this.shaftLensMat) this.shaftLensMat.color.setHex(info.sector.color);
     }
 
-    setTerminalModelOpen(isOpen) {
+    setTerminalModelOpen(isOpen, isSectorPod = false) {
+        if (isSectorPod) {
+            this.sectorTerminalModelTargetTime = isOpen ? 0 : this.terminalClosedTime;
+            if (this.sectorTerminalModelTime === this.sectorTerminalModelTargetTime) {
+                this.sectorTerminalModelMixer?.update(0);
+            }
+            return;
+        }
         this.terminalModelTargetTime = isOpen ? 0 : this.terminalClosedTime;
     }
 
@@ -1120,13 +1695,19 @@ class LevelManager {
         }
     }
 
-    setPodDoorOpen(isOpen) {
-        this.podDoorTarget = isOpen ? 1 : 0;
+    setPodDoorOpen(isOpen, isSectorPod = false) {
+        if (isSectorPod) this.sectorPodDoorTarget = isOpen ? 1 : 0;
+        else this.podDoorTarget = isOpen ? 1 : 0;
     }
 
     // --- LIFT KÖRNYEZETI MOZGÁS VEZÉRLÉS ---
-    startElevator() {
+    startElevator(data) {
         this.isElevatorMoving = true;
+        if (data && data.singleCabin && data.singleCabin.hidden) {
+            this.hideSingleCabin();
+            this.cabinCenter = { x: data.singleCabin.x, z: data.singleCabin.z };
+        } else if (data && data.singleCabin) this.showSingleCabin(data.singleCabin.x, data.singleCabin.z);
+        else this.hideSingleCabin();
         this.targetElevatorSpeed = 0.8; // 50%-kal lassabb sebesség a felvonó mozgásához (1.6 helyett 0.8)
         this.elevatorTransitTimer = 0;
         if (this.gatesGroup) {
@@ -1233,6 +1814,7 @@ class LevelManager {
 
     // --- ZSILIPKAPU NYITÁS ÉS ZÁRÁS VEZÉRLÉS ---
     openDoors(duration = 7.5) {
+        this.hideSingleCabin();
         this.isDoorsOpen = true;
         this.elevatorTransitTimer = 0;
         this.smokeTickTimer = 0.0;
@@ -1252,7 +1834,7 @@ class LevelManager {
         }
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
-            if (this.researchRoomsActive && !d.isResearchDoor) continue;
+            if (this.isSpecialFloor() && !d.replaced) continue;
             d.targetProgress = 1.0;
             d.duration = duration;
             if (d.lightMesh && d.lightMesh.material) {
@@ -1263,7 +1845,7 @@ class LevelManager {
             }
         }
         this.syncResearchRoomVisibility();
-        if (!this.researchRoomsActive) EventBus.emit('GATES_SMOKE_BURST', { gates: this.getGatePouringPositions() });
+        if (!this.isSpecialFloor()) EventBus.emit('GATES_SMOKE_BURST', { gates: this.getGatePouringPositions() });
     }
 
     closeDoors(duration = 1.5) {
@@ -1329,6 +1911,7 @@ class LevelManager {
     }
 
     update(delta) {
+        this.updateNodeDoors(delta);
         for (const terminal of this.researchTerminalAnimations) {
             if (terminal.time === terminal.targetTime) continue;
             const direction = Math.sign(terminal.targetTime - terminal.time);
@@ -1351,11 +1934,28 @@ class LevelManager {
                 this.terminalModelMixer.update(0);
             }
         }
+        if (this.sectorTerminalModelAction && this.sectorTerminalModelMixer) {
+            const timeRemaining = this.sectorTerminalModelTargetTime - this.sectorTerminalModelTime;
+            if (Math.abs(timeRemaining) > 0.001) {
+                this.sectorTerminalModelTime += Math.sign(timeRemaining) * Math.min(delta, Math.abs(timeRemaining));
+                this.sectorTerminalModelAction.time = this.sectorTerminalModelTime;
+                this.sectorTerminalModelMixer.update(0);
+            }
+        }
 
         if (this.podDoorPanels.length) {
             this.podDoorProgress = THREE.MathUtils.damp(this.podDoorProgress, this.podDoorTarget, 5, delta);
             if (Math.abs(this.podDoorProgress - this.podDoorTarget) < 0.005) {
                 this.podDoorProgress = this.podDoorTarget;
+            }
+            if (this.sectorPodDoorPanels.length) {
+                this.sectorPodDoorProgress = THREE.MathUtils.damp(this.sectorPodDoorProgress, this.sectorPodDoorTarget, 5, delta);
+                if (Math.abs(this.sectorPodDoorProgress - this.sectorPodDoorTarget) < 0.005) {
+                    this.sectorPodDoorProgress = this.sectorPodDoorTarget;
+                }
+                for (const panel of this.sectorPodDoorPanels) {
+                    panel.mesh.position.x = panel.direction * (1.025 + this.sectorPodDoorProgress * 2.1);
+                }
             }
             for (const panel of this.podDoorPanels) {
                 panel.mesh.position.x = panel.direction * (1.025 + this.podDoorProgress * 2.1);
@@ -1367,6 +1967,14 @@ class LevelManager {
             if (this.podPowerLight) {
                 const pulse = 0.9 + Math.sin(this.podAnimationTime * (this.isTerminalActive ? 3.4 : 1.2)) * 0.18;
                 this.podPowerLight.intensity = (this.isTerminalActive ? 2.2 : 0.85) * pulse;
+            }
+        }
+        if (this.sectorPodRotor) {
+            this.sectorPodAnimationTime += delta;
+            this.sectorPodRotor.rotation.y += delta * (this.isSectorPodActive ? 1.15 : 0.35);
+            if (this.sectorPodPowerLight) {
+                const pulse = 0.9 + Math.sin(this.sectorPodAnimationTime * (this.isSectorPodActive ? 3.4 : 1.2)) * 0.18;
+                this.sectorPodPowerLight.intensity = (this.isSectorPodActive ? 2.2 : 0.85) * pulse;
             }
         }
 
@@ -1390,6 +1998,7 @@ class LevelManager {
                 this.gatesGroup.visible = false;
             }
         }
+        this.enforceCaveShell();
         this.syncResearchRoomVisibility();
 
         // 1. Környezeti textúra léptetés: A lift LEFELÉ halad, ezért a fal textúrája FELFELE halad
@@ -1509,7 +2118,7 @@ class LevelManager {
         }
 
         // 5. Zsilipkapuk sűrű zöld füstjének kifele ömlése a platform padlójára
-        if (this.isDoorsOpen && !this.researchRoomsActive && this.sterilizationSteamIntensity === 0) {
+        if (this.isDoorsOpen && !this.isSpecialFloor() && this.sterilizationSteamIntensity === 0) {
             this.smokeTickTimer = (this.smokeTickTimer || 0) + delta;
             if (this.smokeTickTimer >= 0.10) {
                 this.smokeTickTimer = 0;
@@ -1529,9 +2138,22 @@ class LevelManager {
             box.max.y < 0 || box.min.y > 2 || box.max.z < minZ || box.min.z > maxZ);
     }
 
+    isSpecialFloor() {
+        return this.researchRoomsActive || this.nodeSectionActive;
+    }
+
+    isInNodeRoom(x, z) {
+        return this.nodeSectionActive && isInResearchNodeRoom(x, z);
+    }
+
     checkWallCollision(x, z, r) {
         // Ha a lift épp mozgásban van szintek között, a platform pereme (24.8m) abszolút biztonsági fal
-        if (this.isElevatorMoving) {
+        if (this.isElevatorMoving && this.cabinCenter) {
+            const half = 1.25;
+            if (Math.abs(x - this.cabinCenter.x) + r > half || Math.abs(z - this.cabinCenter.z) + r > half) {
+                return true;
+            }
+        } else if (this.isElevatorMoving) {
             if (x - r < -24.8 || x + r > 24.8 || z - r < -24.8 || z + r > 24.8) {
                 return true;
             }
@@ -1551,6 +2173,18 @@ class LevelManager {
                 if (this.collisionBoxOverlapsAabb(this.researchHubCollisions[i], minX, maxX, minZ, maxZ)) return true;
             }
         }
+        if (this.isNodeSectionVisible) {
+            for (let i = 0; i < this.nodeStaticCollisions.length; i++) {
+                if (this.collisionBoxOverlapsAabb(this.nodeStaticCollisions[i], minX, maxX, minZ, maxZ)) return true;
+            }
+            const sectionBoxes = this.finalPodRoomActive ? this.finalPodRoomCollisions : this.sectorArenaCollisions;
+            for (let i = 0; i < sectionBoxes.length; i++) {
+                if (this.collisionBoxOverlapsAabb(sectionBoxes[i], minX, maxX, minZ, maxZ)) return true;
+            }
+            for (const door of this.nodeDoors) {
+                if (door.progress < 0.8 && this.collisionBoxOverlapsAabb(door.box, minX, maxX, minZ, maxZ)) return true;
+            }
+        }
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
             if (d.progress < 0.8 && !d.hitbox.isEmpty()) {
@@ -1560,8 +2194,15 @@ class LevelManager {
         if (this.podDoorProgress < 0.98) {
             for (const panel of this.podDoorPanels) {
                 panel.mesh.updateWorldMatrix(true, false);
-                const box = new THREE.Box3().setFromObject(panel.mesh);
+                const box = this._panelBox || (this._panelBox = new THREE.Box3()); box.setFromObject(panel.mesh);
                 if (this.collisionBoxOverlapsAabb(box, minX, maxX, minZ, maxZ)) return true;
+            }
+            if (this.sectorPodDoorProgress < 0.98) {
+                for (const panel of this.sectorPodDoorPanels) {
+                    panel.mesh.updateWorldMatrix(true, false);
+                    const box = this._panelBox || (this._panelBox = new THREE.Box3()); box.setFromObject(panel.mesh);
+                    if (this.collisionBoxOverlapsAabb(box, minX, maxX, minZ, maxZ)) return true;
+                }
             }
         }
         return false;

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import EventBus from './EventBus.js';
 import { ammoPrices, weapons, skills, OmniCorpDirectives } from './Database.js';
 import { playerStats, savePlayerStats } from './RuntimeState.js';
-import { getCampaignFloorInfo, getResearchHubStationAt, researchCommsLog } from './Campaign.js';
+import { getCampaignFloorInfo, getResearchHubStationAt, researchCommsLog, researchHubStations, researchNodeSection, nodeUnlockStation, sectorHallCenter } from './Campaign.js';
 
 export class GameManager {
     constructor() {
@@ -15,6 +15,8 @@ export class GameManager {
         this.researchFloorActive = false;
         this.pendingResearchArrival = false;
         this.researchVisitedFloor = 0;
+        this.nodeState = 'none';
+        this.pendingGateArrival = false;
         this.pendingTargetFloor = null;
         this.enemiesToSpawn = 5;
         this.pendingEnemySpawns = [];
@@ -27,6 +29,8 @@ export class GameManager {
         this.waveStartTime = 0;
         this.isWaveActive = false;
         this.terminalReady = false;
+        this.activePodIsSector = false;
+        this.sectorLiftTransit = false;
         this.terminalPromptVisible = false;
         this.terminalSequence = 'idle';
         this.terminalSequenceTime = 0;
@@ -47,11 +51,15 @@ export class GameManager {
 
         this.waveTimeout = null;
         this.glitchInterval = null;
+        this.waveSwapTimeout = null;
+        this.waveStartMoveTimeout = null;
 
         // Ipari felvonó állapotváltozói
         this.isElevating = false;
         this.elevatorPhase = 'idle'; // 'idle', 'moving', 'stopping', 'opening', 'done'
         this.elevatorTimer = 0;
+        this.elevatorExtraTime = 0;
+        this.caveReinforcementTimer = 0;
 
         this.player = null;
         this.levelManager = null;
@@ -109,6 +117,7 @@ export class GameManager {
         EventBus.on('TRY_BUY_ARMOR', (data) => this.onTryBuyArmor(data));
         EventBus.on('TRY_BUY_CLEAN', (data) => this.onTryBuyClean(data));
         EventBus.on('TRY_BUY_NEXUS_PURGE', () => this.onTryBuyNexusPurge());
+        EventBus.on('TRY_UNLOCK_NODE_EXIT', () => this.onTryUnlockNodeExit());
         EventBus.on('TRY_BUY_RESONATOR', (data) => this.onTryBuyResonator(data));
         EventBus.on('TRY_BUY_NEURAL', (data) => this.onTryBuyNeural(data));
         EventBus.on('REQUEST_SHOP_UPDATE', () => this.sendShopData());
@@ -120,7 +129,7 @@ export class GameManager {
                 EventBus.emit('RESEARCH_TERMINAL_CLOSE', { station: this.activeResearchStation });
                 return;
             }
-            if (this.gameState !== 'SHOPPING' || !this.terminalReady || this.terminalSequence !== 'menu') return;
+            if (this.gameState !== 'SHOPPING' || (!this.terminalReady && !this.activePodIsSector) || this.terminalSequence !== 'menu') return;
             this.beginTerminalExit();
         });
         EventBus.on('CHANGE_GAME_STATE', (state) => { this.gameState = state; });
@@ -138,13 +147,14 @@ export class GameManager {
             EventBus.emit('UI_UPDATE_NEEDED');
         });
         EventBus.on('DEV_SET_FLOOR', (floor) => {
-            if (!Number.isInteger(floor) || floor < 1 || floor > 100) {
+            if (!Number.isInteger(floor) || floor < 1 || floor > 102) {
                 EventBus.emit('DEV_FLOOR_TARGET_FAILED');
                 return;
             }
             this.pendingTargetFloor = floor;
             EventBus.emit('DEV_FLOOR_TARGET_SET', { floor });
         });
+        EventBus.on('DEV_MAX_ALL', () => this.devMaxAll());
         EventBus.on('DEV_SET_GOD_MODE', (isGod) => {
             this.isGodMode = isGod;
             EventBus.emit('SET_GOD_MODE', isGod);
@@ -160,15 +170,23 @@ export class GameManager {
     onReturnToMainMenu() {
         this.gameState = 'MENU';
         this.terminalSequence = 'idle';
+        this.activePodIsSector = false;
+        this.sectorLiftTransit = false;
         this.activeResearchFloor = null;
         this.activeResearchStation = null;
         this.isResearchHubActive = false;
-        if (this.levelManager) this.levelManager.setPodDoorOpen(false);
+        if (this.levelManager) {
+            this.levelManager.setPodDoorOpen(false);
+            this.levelManager.setPodDoorOpen(false, true);
+        }
         this.researchFloorActive = false;
         this.pendingResearchArrival = false;
         this.researchVisitedFloor = 0;
+        this.nodeState = 'none';
+        this.pendingGateArrival = false;
         this.pendingTargetFloor = null;
         EventBus.emit('RESEARCH_ROOMS_SET', { active: false });
+        EventBus.emit('RESEARCH_NODE_SECTION_SET', { active: false });
         this.isWaveActive = false;
         this.terminalReady = false;
         this.setTerminalPromptVisible(false);
@@ -210,15 +228,21 @@ export class GameManager {
     onStartGame(data) {
         this.gameState = 'PLAYING';
         this.terminalSequence = 'idle';
+        this.activePodIsSector = false;
+        this.sectorLiftTransit = false;
         this.activeResearchFloor = null;
         this.activeResearchStation = null;
         this.isResearchHubActive = false;
         this.researchFloorActive = false;
         this.pendingResearchArrival = false;
         this.researchVisitedFloor = 0;
+        this.nodeState = 'none';
         this.pendingTargetFloor = null;
         EventBus.emit('RESEARCH_ROOMS_SET', { active: false });
-        if (this.levelManager) this.levelManager.setPodDoorOpen(false);
+        if (this.levelManager) {
+            this.levelManager.setPodDoorOpen(false);
+            this.levelManager.setPodDoorOpen(false, true);
+        }
         this.currentWave = 1;
         this.hasStartedAnyWave = false;
         this.enemiesToSpawn = 5;
@@ -348,11 +372,21 @@ export class GameManager {
             clearTimeout(this.waveTimeout);
             this.waveTimeout = null;
         }
+        if (this.waveSwapTimeout) {
+            clearTimeout(this.waveSwapTimeout);
+            this.waveSwapTimeout = null;
+        }
+        if (this.waveStartMoveTimeout) {
+            clearTimeout(this.waveStartMoveTimeout);
+            this.waveStartMoveTimeout = null;
+        }
         if (this.glitchInterval) {
             clearInterval(this.glitchInterval);
             this.glitchInterval = null;
         }
 
+        this.sectorLiftTransit = this.activePodIsSector;
+        this.activePodIsSector = false;
         this.terminalReady = false;
         this.activeResearchFloor = null;
         this.activeResearchStation = null;
@@ -372,14 +406,41 @@ export class GameManager {
 
         const floorInfo = getCampaignFloorInfo(this.currentWave);
         this.pendingResearchArrival = floorInfo.isResearchFloor && this.researchVisitedFloor !== this.currentWave;
+        this.pendingGateArrival = floorInfo.isSectorGate && this.researchVisitedFloor !== this.currentWave;
+        this.nodeState = 'none';
         EventBus.emit('WAVE_CHANGED', this.currentWave);
+        this.elevatorExtraTime = floorInfo.isCaveFloor ? 6 : 0;
         EventBus.emit('WAVE_STARTING', {
             wave: this.currentWave,
+            isCave: floorInfo.isCaveFloor,
             sector: floorInfo.sector.name,
-            isServerRoom: floorInfo.bossCount > 0 && !this.pendingResearchArrival,
-            bossCount: this.pendingResearchArrival ? 0 : floorInfo.bossCount
+            isServerRoom: floorInfo.isSectorGate,
+            bossCount: floorInfo.bossCount
         });
         EventBus.emit('RESEARCH_ROOMS_SET', { active: this.pendingResearchArrival });
+        // A szektorlift tengelye azonos a főaréna tengelyével: a lift indulásakor a játékos a külön pályáról a
+        // pontosan ugyanolyan, lezárt főarénába kerül, így a lefelé út már a megszokott módon zajlik
+        // (a csere a lift felpörgése alatt, elsötétített képernyő mögött történik)
+        const swap = () => {
+            if (fadeSwap && this.player && this.player.camera) {
+                this.player.camera.position.x += sectorHallCenter;
+                this.player.playerVelX = 0;
+                this.player.playerVelZ = 0;
+            }
+            EventBus.emit('RESEARCH_NODE_SECTION_SET', { active: this.pendingGateArrival, isFinal: this.currentWave === 101 });
+        };
+        const fadeSwap = this.sectorLiftTransit && this.currentWave !== 102;
+        this.sectorLiftTransit = false;
+        if (fadeSwap) {
+            EventBus.emit('SCREEN_FADE', { black: true, ms: 450 });
+            this.waveSwapTimeout = setTimeout(() => {
+                this.waveSwapTimeout = null;
+                swap();
+                EventBus.emit('SCREEN_FADE', { black: false, ms: 900 });
+            }, 520);
+        } else {
+            swap();
+        }
 
         // Zsilipkapuk bezárása a szintek közötti liftezés idejére
         EventBus.emit('CLOSE_AIRLOCK_GATES', { duration: 1.0 });
@@ -389,19 +450,35 @@ export class GameManager {
         this.elevatorPhase = 'moving';
         this.elevatorTimer = 0;
 
-        EventBus.emit('START_ELEVATOR_MOVE');
+        const camPos = this.player && this.player.camera ? this.player.camera.position : { x: 0, z: 0 };
+        const startMove = () => {
+            const pos = this.player && this.player.camera ? this.player.camera.position : camPos;
+            EventBus.emit('START_ELEVATOR_MOVE', floorInfo.isCaveFloor ? { singleCabin: { x: pos.x, z: pos.z } } : undefined);
+        };
+        // A lift a csere után, a fekete képernyő alatt indul
+        if (fadeSwap) {
+            this.waveStartMoveTimeout = setTimeout(() => {
+                this.waveStartMoveTimeout = null;
+                startMove();
+            }, 540);
+        }
+        else startMove();
         EventBus.emit('PLAY_SOUND', { id: 'elevatorMove' });
     }
 
     _startResearchFloor() {
+        const isGate = this.pendingGateArrival;
         this.pendingResearchArrival = false;
+        this.pendingGateArrival = false;
         this.researchFloorActive = true;
         this.researchVisitedFloor = this.currentWave;
         this.activeResearchFloor = this.currentWave;
-        this.terminalReady = true;
         this.gameState = 'PLAYING';
         const floorInfo = getCampaignFloorInfo(this.currentWave);
-        EventBus.emit('RESEARCH_FLOOR_ENTERED', { floor: this.currentWave, sector: floorInfo.sector.name });
+        // A szektorhatár-szinteken a központi terminál nem használható: a lejutás csak az új lifttel lehetséges
+        this.nodeState = isGate ? 'sealed' : 'none';
+        this.terminalReady = !isGate;
+        EventBus.emit('RESEARCH_FLOOR_ENTERED', { floor: this.currentWave, sector: floorInfo.sector.name, isGate, isFinal: floorInfo.isFinalGate });
         this.updateTerminalProximity();
     }
 
@@ -413,21 +490,12 @@ export class GameManager {
 
         EventBus.emit('WAVE_STARTED', { wave: this.currentWave });
 
-        // Dobozok lerakása a hullám elején
+        // A földön nincs ellátmány, csak az ellenfelek dobnak
         if (this.itemManager) {
             if (this.itemManager.lootItems) {
                 this.itemManager.clearLootItems();
             }
 
-            let playerPos = this.player && this.player.camera ? this.player.camera.position : { x: 0, y: 0, z: 0 };
-            for (let i = 0; i < 4; i++) {
-                let mPos = this.enemyManager ? this.enemyManager.getSafeSpawnPosition(0.5, playerPos, 5) : { x: (Math.random() - 0.5) * 40, z: (Math.random() - 0.5) * 40 };
-                this.itemManager.spawnMedkit(mPos.x, mPos.z);
-            }
-            for (let i = 0; i < 4; i++) {
-                let aPos = this.enemyManager ? this.enemyManager.getSafeSpawnPosition(0.4, playerPos, 5) : { x: (Math.random() - 0.5) * 40, z: (Math.random() - 0.5) * 40 };
-                this.itemManager.spawnAmmoBox(aPos.x, aPos.z);
-            }
         }
 
         // A nagy hullámok ne hozzák létre egyszerre az összes modellt.
@@ -435,8 +503,10 @@ export class GameManager {
             this.pendingEnemySpawns.length = 0;
             this.pendingAggressiveSpawns = 0;
             const floorInfo = getCampaignFloorInfo(this.currentWave);
-            const bossCount = floorInfo.bossCount || (this.currentWave % 5 === 0 && this.currentWave >= 5 ? 1 : 0);
-            for (let i = 0; i < this.enemiesToSpawn; i++) {
+            const bossCount = floorInfo.bossCount;
+            const initialSpawns = floorInfo.isCaveFloor ? bossCount + 10 : this.enemiesToSpawn;
+            this.caveReinforcementTimer = 4;
+            for (let i = 0; i < initialSpawns; i++) {
                 let isBoss = i < bossCount;
                 this.pendingEnemySpawns.push({ isBoss, forceType: null });
                 this.pendingAggressiveSpawns++;
@@ -458,6 +528,30 @@ export class GameManager {
         }
         this.enemySpawnTimer = 0;
         this.spawnQueuedEnemies(0);
+    }
+
+    getAliveBossCount() {
+        return this.enemyManager ? this.enemyManager.enemies.filter(e => e.type === 'boss').length : 0;
+    }
+
+    isCaveBattleOver() {
+        return this.getAliveBossCount() === 0 &&
+            !this.pendingEnemySpawns.some(spawn => spawn.isBoss);
+    }
+
+    // A barlang járataiból folyamatosan érkeznek az apróbb ellenfelek, amíg él Nexus Node
+    updateCaveReinforcements(delta) {
+        if (!this.isWaveActive || !this.enemyManager || this.currentWave !== 102) return;
+        if (this.isCaveBattleOver()) return;
+        this.caveReinforcementTimer -= delta;
+        if (this.caveReinforcementTimer > 0) return;
+        this.caveReinforcementTimer = 2.5;
+        const smallEnemies = this.enemyManager.enemies.filter(e => e.type !== 'boss').length;
+        if (smallEnemies + this.pendingEnemySpawns.length >= 18) return;
+        const types = [null, null, 'runner', 'crawler'];
+        const forceType = types[Math.floor(Math.random() * types.length)];
+        this.pendingEnemySpawns.push({ isBoss: false, forceType });
+        if (forceType !== 'crawler') this.pendingAggressiveSpawns++;
     }
 
     spawnQueuedEnemies(delta) {
@@ -502,7 +596,8 @@ export class GameManager {
 
         if (this.isWaveActive && this.enemyManager) {
             let activeAggressive = this.enemyManager.enemies.filter(e => e.type !== 'crawler').length;
-            if (activeAggressive === 0 && this.pendingAggressiveSpawns === 0) {
+            const caveWon = this.currentWave === 102 && this.isCaveBattleOver();
+            if (caveWon || (activeAggressive === 0 && this.pendingAggressiveSpawns === 0)) {
                 this.endWave();
             }
         }
@@ -534,11 +629,11 @@ export class GameManager {
         EventBus.emit('UI_UPDATE_NEEDED');
 
         const nextFloor = this.currentWave + 1;
-        const nextFloorInfo = nextFloor <= 100 ? getCampaignFloorInfo(nextFloor) : null;
+        const nextFloorInfo = nextFloor <= 102 ? getCampaignFloorInfo(nextFloor) : null;
         const isResearchStop = !!(nextFloorInfo && nextFloorInfo.isResearchFloor);
         this.activeResearchFloor = null;
 
-        if (this.currentWave >= 100) {
+        if (this.currentWave >= 102) {
             this.gameState = 'VICTORY';
             this.terminalReady = false;
             this.setTerminalPromptVisible(false);
@@ -576,6 +671,13 @@ export class GameManager {
     }
 
     updateTerminalProximity() {
+        if (this.researchFloorActive && this.nodeState === 'unlocked' && this.player && this.player.camera) {
+            const { x, z } = this.player.camera.position;
+            const doorwayZ = 4.45 * (3.2 / 9.8);
+            const isNearSectorPod = Math.hypot(x + sectorHallCenter, z - doorwayZ) <= 0.9;
+            this.setTerminalPromptVisible(isNearSectorPod && this.isFacingTerminalDoor(doorwayZ, -sectorHallCenter));
+            return;
+        }
         if (!this.terminalReady || !this.player || !this.player.camera) {
             this.setTerminalPromptVisible(false);
             return;
@@ -587,10 +689,10 @@ export class GameManager {
         this.setTerminalPromptVisible(isNearTerminal && this.isFacingTerminalDoor(doorwayZ));
     }
 
-    isFacingTerminalDoor(doorwayZ) {
+    isFacingTerminalDoor(doorwayZ, doorwayX = 0) {
         const camera = this.player.camera;
-        const toDoor = new THREE.Vector3(-camera.position.x, 0, doorwayZ - camera.position.z);
-        if (toDoor.lengthSq() === 0) return false;
+        const toDoor = new THREE.Vector3(doorwayX - camera.position.x, 0, doorwayZ - camera.position.z);
+        if (toDoor.lengthSq() < 0.01) return true;
 
         const forward = camera.getWorldDirection(new THREE.Vector3());
         forward.y = 0;
@@ -600,7 +702,21 @@ export class GameManager {
     }
 
     tryActivateTerminal() {
-        if (this.researchFloorActive && this.gameState === 'PLAYING' && this.tryResearchHubInteraction()) return;
+        if (!this.player || !this.player.camera) return;
+        if (this.researchFloorActive && this.gameState === 'PLAYING') {
+            if (this.nodeState === 'unlocked') {
+                const { x, z } = this.player.camera.position;
+                const doorwayZ = 4.45 * (3.2 / 9.8);
+                if (Math.hypot(x + sectorHallCenter, z - doorwayZ) <= 0.9 &&
+                    this.isFacingTerminalDoor(doorwayZ, -sectorHallCenter)) {
+                    EventBus.emit('CONSUME_INTERACTION');
+                    this.setTerminalPromptVisible(false);
+                    this.beginTerminalEntry(true);
+                    return;
+                }
+            }
+            if (this.tryResearchHubInteraction()) return;
+        }
         if (!this.terminalReady || this.gameState !== 'PLAYING' || !this.player || !this.player.camera) return;
 
         const { x, z } = this.player.camera.position;
@@ -612,17 +728,18 @@ export class GameManager {
         this.beginTerminalEntry();
     }
 
-    beginTerminalEntry() {
+    beginTerminalEntry(isSectorPod = false) {
         if (!this.levelManager || this.terminalSequence !== 'idle') return;
+        this.activePodIsSector = isSectorPod;
         EventBus.emit('CLEAR_CORPSES');
-        EventBus.emit('TERMINAL_OPEN');
+        EventBus.emit('TERMINAL_OPEN', { isSectorPod });
         if (this.weaponSystem) this.weaponSystem.holsterForTerminal();
         this.gameState = 'TERMINAL_TRANSITION';
         this.terminalSequence = 'enter-opening';
         this.terminalSequenceTime = 0;
         this.player.playerVelX = 0;
         this.player.playerVelZ = 0;
-        this.levelManager.setPodDoorOpen(true);
+        this.levelManager.setPodDoorOpen(true, isSectorPod);
     }
 
     updateResearchHubProximity() {
@@ -630,11 +747,71 @@ export class GameManager {
             this.setResearchHubPromptVisible(false);
             return;
         }
-        const station = getResearchHubStationAt(this.player.camera.position);
+        const station = this.getHubTarget();
         const stationId = station ? station.id : null;
         if (stationId === this.activeResearchStation) return;
         this.activeResearchStation = stationId;
         this.setResearchHubPromptVisible(!!station, station);
+    }
+
+    getAvailableHubStations() {
+        if (this.nodeState === 'none') return researchHubStations;
+        return this.nodeState === 'cleared' ? [nodeUnlockStation] : [];
+    }
+
+    getHubTarget() {
+        const position = this.player.camera.position;
+        const station = getResearchHubStationAt(position, 2.5, this.getAvailableHubStations());
+        if (station) return station;
+        return null;
+    }
+
+    onTryUnlockNodeExit() {
+        if (this.gameState !== 'SHOPPING' || this.terminalSequence !== 'hub-menu' || this.activeResearchStation !== 'unlock') return;
+        if (this.nodeState !== 'cleared') return;
+        this.nodeState = 'unlocked';
+        EventBus.emit('NODE_EXIT_UNLOCKED');
+        EventBus.emit('PLAY_SOUND', { id: 'gateOpen' });
+        this.openResearchHubShop('unlock');
+    }
+
+    updateNodeSection() {
+        if (!this.researchFloorActive || !this.player || !this.player.camera) return;
+        if (this.nodeState !== 'sealed' && this.nodeState !== 'fighting') return;
+        const distance = -this.player.camera.position.x;
+        const inCorridor = Math.abs(this.player.camera.position.z) <= researchNodeSection.corridorHalfWidth;
+        if (this.nodeState === 'sealed') {
+            if (inCorridor && distance > researchNodeSection.gateDistance - 8) {
+                EventBus.emit('NODE_GATE_SET', { open: true });
+            }
+            if (inCorridor && distance > researchNodeSection.lockDistance) this.engageNode();
+        } else if (this.nodeState === 'fighting' && this.getAliveBossCount() === 0) {
+            this.nodeState = 'cleared';
+            EventBus.emit('NODE_CLEARED', { isFinal: this.currentWave === 101 });
+            EventBus.emit('PLAY_SOUND', { id: 'gateOpen' });
+        }
+    }
+
+    engageNode() {
+        this.nodeState = 'fighting';
+        EventBus.emit('NODE_GATE_SET', { open: false, isFinal: this.currentWave === 101 });
+        EventBus.emit('PLAY_SOUND', { id: 'gateOpen' });
+        const count = getCampaignFloorInfo(this.currentWave).nodeBossCount;
+        for (let i = 0; i < count; i++) {
+            const z = count === 1 ? 0 : (i - (count - 1) / 2) * 8;
+            this.enemyManager.spawnEnemy(-researchNodeSection.bossDistance, z, true, null, this.currentWave, undefined, { dirX: 1, dirZ: 0 });
+            // A 101. szint szerverterme őrzője Gallagher: megkülönböztető, jeges-fehér árnyalat
+            const boss = this.enemyManager.enemies[this.enemyManager.enemies.length - 1];
+            if (this.currentWave === 101 && boss && boss.type === 'boss' && boss.mesh) {
+                boss.isGallagher = true;
+                boss.mesh.traverse(object => {
+                    if (!object.isMesh || !object.material || !object.material.color) return;
+                    object.material = object.material.clone();
+                    object.material.color.lerp(new THREE.Color(0xdfeaff), 0.55);
+                    if (object.material.emissive) object.material.emissive.setHex(0x2255aa);
+                });
+            }
+        }
     }
 
     setResearchHubPromptVisible(visible, station = null) {
@@ -648,7 +825,7 @@ export class GameManager {
 
     tryResearchHubInteraction() {
         if (!this.player || !this.player.camera) return;
-        const station = getResearchHubStationAt(this.player.camera.position);
+        const station = this.getHubTarget();
         if (!station) return false;
         EventBus.emit('CONSUME_INTERACTION');
         this.setResearchHubPromptVisible(false);
@@ -685,6 +862,8 @@ export class GameManager {
             researchFloor: this.activeResearchFloor,
             sector: getCampaignFloorInfo(this.activeResearchFloor).sector.name,
             researchStation: station,
+            nodeUnlocked: this.nodeState === 'unlocked',
+            isFinalGate: this.activeResearchFloor === 101,
             researchTab: station === 'augmentation' ? 'skills' : 'weapons',
             commsLog: station === 'comms'
                 ? Object.keys(researchCommsLog).map(Number).filter(floor => floor <= this.activeResearchFloor)
@@ -695,14 +874,15 @@ export class GameManager {
 
     beginTerminalExit() {
         if (!this.levelManager || this.terminalSequence !== 'menu') return;
-        EventBus.emit('TERMINAL_CLOSE');
+        EventBus.emit('TERMINAL_CLOSE', { isSectorPod: this.activePodIsSector });
         this.gameState = 'TERMINAL_TRANSITION';
         this.terminalSequence = 'exit-opening';
         this.terminalSequenceTime = 0;
         this.player.playerVelX = 0;
         this.player.playerVelZ = 0;
         EventBus.emit('TERMINAL_RESET');
-        this.levelManager.setPodDoorOpen(true);
+        if (this.activePodIsSector) this.levelManager.setSectorPodActive(true);
+        this.levelManager.setPodDoorOpen(true, this.activePodIsSector);
     }
 
     startTerminalMove(target, nextSequence) {
@@ -715,7 +895,8 @@ export class GameManager {
 
     startTerminalExitTurn() {
         const camera = this.player.camera;
-        const exitDirection = new THREE.Vector3(-camera.position.x, 0, 2.2 - camera.position.z);
+        const podCenterX = this.activePodIsSector ? -sectorHallCenter : 0;
+        const exitDirection = new THREE.Vector3(podCenterX - camera.position.x, 0, 2.2 - camera.position.z);
         if (exitDirection.lengthSq() === 0) exitDirection.set(0, 0, 1);
         exitDirection.normalize();
 
@@ -734,6 +915,9 @@ export class GameManager {
         if (!this.player || !this.player.camera || !this.levelManager) return;
         if (this.weaponSystem) this.weaponSystem.updateTerminalTransition(delta);
         this.terminalSequenceTime += delta;
+        const activePodDoorProgress = this.activePodIsSector
+            ? this.levelManager.sectorPodDoorProgress
+            : this.levelManager.podDoorProgress;
         if (this.terminalSequence === 'healing') {
             this.updateHealingSequence();
             return;
@@ -743,8 +927,8 @@ export class GameManager {
             return;
         }
 
-        if (this.terminalSequence === 'enter-opening' && this.levelManager.podDoorProgress >= 0.98) {
-            this.startTerminalMove({ x: 0, y: 1.6, z: 0.15 }, 'enter-moving');
+        if (this.terminalSequence === 'enter-opening' && activePodDoorProgress >= 0.98) {
+            this.startTerminalMove({ x: this.activePodIsSector ? -sectorHallCenter : 0, y: 1.6, z: 0.15 }, 'enter-moving');
         } else if (this.terminalSequence === 'enter-moving') {
             const progress = Math.min(1, this.terminalSequenceTime / 1.0);
             const eased = progress * progress * (3 - 2 * progress);
@@ -756,9 +940,9 @@ export class GameManager {
             if (progress >= 1) {
                 this.terminalSequence = 'enter-closing';
                 this.terminalSequenceTime = 0;
-                this.levelManager.setPodDoorOpen(false);
+                this.levelManager.setPodDoorOpen(false, this.activePodIsSector);
             }
-        } else if (this.terminalSequence === 'enter-closing' && this.levelManager.podDoorProgress <= 0.02) {
+        } else if (this.terminalSequence === 'enter-closing' && activePodDoorProgress <= 0.02) {
             this.gameState = 'SHOPPING';
             this.terminalSequence = 'menu';
             EventBus.emit('TERMINAL_SESSION_ACTIVE');
@@ -766,7 +950,7 @@ export class GameManager {
                 shopLockedForNextWave: this.shopLockedForNextWave,
                 terminal: true
             });
-        } else if (this.terminalSequence === 'exit-opening' && this.levelManager.podDoorProgress >= 0.98) {
+        } else if (this.terminalSequence === 'exit-opening' && activePodDoorProgress >= 0.98) {
             this.startTerminalExitTurn();
         } else if (this.terminalSequence === 'exit-turning') {
             const progress = Math.min(1, this.terminalSequenceTime / 0.55);
@@ -776,7 +960,7 @@ export class GameManager {
                 this.player.camera.quaternion.copy(this.terminalTurnTo);
                 const inputManager = this.player.inputManagerRef || (this.weaponSystem && this.weaponSystem.inputManagerRef);
                 if (inputManager) inputManager.yaw = this.terminalTurnYaw;
-                this.startTerminalMove({ x: 0, y: 1.6, z: 2.2 }, 'exit-moving');
+                this.startTerminalMove({ x: this.activePodIsSector ? -sectorHallCenter : 0, y: 1.6, z: 2.2 }, 'exit-moving');
             }
         } else if (this.terminalSequence === 'exit-moving') {
             const progress = Math.min(1, this.terminalSequenceTime / 1.1);
@@ -789,10 +973,10 @@ export class GameManager {
             if (progress >= 1) {
                 this.terminalSequence = 'exit-closing';
                 this.terminalSequenceTime = 0;
-                this.levelManager.setPodDoorOpen(false);
+                this.levelManager.setPodDoorOpen(false, this.activePodIsSector);
                 if (this.weaponSystem) this.weaponSystem.drawFromTerminal();
             }
-        } else if (this.terminalSequence === 'exit-closing' && this.levelManager.podDoorProgress <= 0.02) {
+        } else if (this.terminalSequence === 'exit-closing' && activePodDoorProgress <= 0.02) {
             this.terminalSequence = 'idle';
             this.gameState = 'PLAYING';
             this.player.playerVelX = 0;
@@ -827,6 +1011,7 @@ export class GameManager {
         if (this.gameState !== 'PLAYING') return;
 
         this.updateTerminalProximity();
+        this.updateNodeSection();
         this.updateResearchHubProximity();
 
         // Ipari felvonó és zsilipkapu szekvencia a szintek között
@@ -835,7 +1020,7 @@ export class GameManager {
 
             // 1. Fázis: Lift süllyed a mélybe (6.5 mp dübörgés és fal-textúra görgetés)
             if (this.elevatorPhase === 'moving') {
-                if (this.elevatorTimer >= 6.5) {
+                if (this.elevatorTimer >= 6.5 + this.elevatorExtraTime) {
                     this.elevatorPhase = 'stopping';
                     EventBus.emit('STOP_AUDIO', { id: 'elevatorMove' });
                     EventBus.emit('PLAY_SOUND', { id: 'elevatorStop' });
@@ -846,7 +1031,7 @@ export class GameManager {
             } 
             // 2. Fázis: Lift megáll (1.5 mp fékezés), megérkeztünk -> kinyílnak a zsilipkapuk
             else if (this.elevatorPhase === 'stopping') {
-                if (this.elevatorTimer >= 8.0) {
+                if (this.elevatorTimer >= 8.0 + this.elevatorExtraTime) {
                     this.elevatorPhase = 'opening';
                     EventBus.emit('PLAY_SOUND', { id: 'gateOpen' });
                     EventBus.emit('OPEN_AIRLOCK_GATES', { duration: 7.5 });
@@ -855,14 +1040,16 @@ export class GameManager {
             } 
             // 3. Fázis: Zsilipkapuk kitárultak -> a szint élesedik, ellenfelek beözönlenek
             else if (this.elevatorPhase === 'opening') {
-                if (this.elevatorTimer >= 15.5) {
+                if (this.elevatorTimer >= 15.5 + this.elevatorExtraTime) {
                     this.isElevating = false;
                     this.elevatorPhase = 'done';
-                    if (this.pendingResearchArrival) this._startResearchFloor();
+                    if (this.pendingResearchArrival || this.pendingGateArrival) this._startResearchFloor();
                     else this._startWaveAction();
                 }
             }
         }
+
+        this.updateCaveReinforcements(delta);
 
         // Fagyasztás időzítő és terem effektek
         if (this.activeFreezeTimer > 0) {
@@ -1018,6 +1205,52 @@ export class GameManager {
         }
         EventBus.emit('PURCHASE_SUCCESS');
         this.sendShopData();
+    }
+
+    devMaxAll() {
+        for (const id in weapons) {
+            const w = weapons[id];
+            if (id === 'melee') continue;
+            w.owned = true;
+            while (w.level < 5) {
+                w.level++;
+                if (w.level === 2) w.maxReserve = Math.floor(w.maxReserve * 1.5);
+                if (w.level === 3) w.reloadTime = Math.floor(w.reloadTime * 0.75);
+                if (w.level === 4) {
+                    if (id === 'super') w.damage = Math.floor(w.damage * 1.5);
+                    else w.maxAmmo = Math.floor(w.maxAmmo * 1.5);
+                }
+                if (w.level === 5) w.damage *= 2;
+            }
+            if (playerStats && playerStats.weaponsBought) playerStats.weaponsBought[id] = true;
+        }
+        for (const id in skills) {
+            const sk = skills[id];
+            while (sk.level < sk.maxLevel) {
+                sk.level++;
+                if (id === 'ammoLoot') {
+                    for (const key in weapons) weapons[key].maxReserve = Math.floor(weapons[key].maxReserve * 1.20);
+                }
+            }
+        }
+        for (const id in weapons) {
+            if (id === 'melee') continue;
+            weapons[id].ammo = weapons[id].maxAmmo;
+            weapons[id].reserve = weapons[id].maxReserve;
+        }
+        if (this.player) {
+            const maxHP = 100 + skills.maxHealth.level * 20;
+            this.player.maxHealth = maxHP;
+            this.player.health = maxHP;
+            EventBus.emit('HP_CHANGED', { current: maxHP, max: maxHP });
+        }
+        if (skills.freeze.level > 0) EventBus.emit('UPDATE_FREEZE_UI', { unlocked: true, cooldown: this.freezeCooldown });
+        if (playerStats && typeof savePlayerStats === 'function') savePlayerStats();
+        const cur = this.weaponSystem && weapons[this.weaponSystem.currentWeaponId];
+        if (cur) {
+            EventBus.emit('AMMO_CHANGED', { ammo: cur.ammo, reserve: cur.reserve, maxAmmo: cur.maxAmmo, maxReserve: cur.maxReserve });
+        }
+        EventBus.emit('UI_UPDATE_NEEDED');
     }
 
     onTryBuySkill(data) {
