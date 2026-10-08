@@ -537,26 +537,6 @@ export class EnemyManager {
             const materials = Array.isArray(child.material) ? child.material : [child.material];
             for (const material of materials) {
                 if (!material || !material.userData) continue;
-                if (material.userData.gallagherBaseColor !== undefined) {
-                    material.color.setHex(material.userData.gallagherBaseColor);
-                    if (material.emissive && material.userData.gallagherBaseEmissive !== null) {
-                        material.emissive.setHex(material.userData.gallagherBaseEmissive);
-                    }
-                    material.emissiveIntensity = material.userData.gallagherBaseEmissiveIntensity;
-                    delete material.userData.gallagherBaseColor;
-                    delete material.userData.gallagherBaseEmissive;
-                    delete material.userData.gallagherBaseEmissiveIntensity;
-                }
-                if (material.userData.caveNodeBaseColor !== undefined) {
-                    material.color.setHex(material.userData.caveNodeBaseColor);
-                    if (material.emissive && material.userData.caveNodeBaseEmissive !== null) {
-                        material.emissive.setHex(material.userData.caveNodeBaseEmissive);
-                    }
-                    material.emissiveIntensity = material.userData.caveNodeBaseEmissiveIntensity;
-                    delete material.userData.caveNodeBaseColor;
-                    delete material.userData.caveNodeBaseEmissive;
-                    delete material.userData.caveNodeBaseEmissiveIntensity;
-                }
             }
         });
 
@@ -607,7 +587,7 @@ export class EnemyManager {
                 if (child.isMesh) {
                     child.frustumCulled = false;
                     
-                    if (opacity < 1.0 || type === 'runner' || (type === 'boss' && currentWave === 102)) {
+                    if (opacity < 1.0 || type === 'runner') {
                         if (Array.isArray(child.material)) {
                             child.material = child.material.map(material => {
                                 const clonedMaterial = material.clone();
@@ -641,32 +621,6 @@ export class EnemyManager {
                         });
                     }
                 }
-            });
-        }
-
-        if (type === 'boss' && currentWave === 102) {
-            mesh.traverse(child => {
-                if (!child.isMesh || !child.material) return;
-                const materials = Array.isArray(child.material) ? child.material : [child.material];
-                const styled = materials.map(material => {
-                    if (!material || !material.color) return material;
-                    if (!ownedMaterials.includes(material)) {
-                        material = material.clone();
-                        ownedMaterials.push(material);
-                    }
-                    if (material.userData.caveNodeBaseColor === undefined) {
-                        material.userData.caveNodeBaseColor = material.color.getHex();
-                        material.userData.caveNodeBaseEmissive = material.emissive ? material.emissive.getHex() : null;
-                        material.userData.caveNodeBaseEmissiveIntensity = material.emissiveIntensity;
-                    }
-                    material.color.setHex(material.userData.caveNodeBaseColor).lerp(new THREE.Color(0x8e3519), 0.48);
-                    if (material.emissive) {
-                        material.emissive.setHex(0x5b1708);
-                        material.emissiveIntensity = Math.max(material.emissiveIntensity || 0, 0.65);
-                    }
-                    return material;
-                });
-                child.material = Array.isArray(child.material) ? styled : styled[0];
             });
         }
 

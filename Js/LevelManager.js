@@ -1722,11 +1722,27 @@ class LevelManager {
             for (const item of this.sectorArenaItems || []) item.visible = false;
         }
         if (this.caveWalls) this.caveWalls.visible = isOn;
+        if (this.caveGroup) this.caveGroup.visible = isOn;
+        this.applyCaveAtmosphere(isOn);
         if (!isOn) {
             for (const item of this.arenaShellItems || []) item.visible = true;
             if (this.gatesGroup) this.gatesGroup.visible = this.isDoorsOpen;
         }
         this.enforceCaveShell();
+    }
+
+    applyCaveAtmosphere(isOn) {
+        if (!this.scene || !this.scene.fog) return;
+        if (this.defaultFogColor === undefined) this.defaultFogColor = this.scene.fog.color.getHex();
+        this.scene.userData.caveAtmosphere = isOn;
+        if (isOn) {
+            this.scene.fog.color.setHex(0x1a0805);
+            this.scene.fog.density = 0.022;
+            if (this.scene.background && this.scene.background.isColor) this.scene.background.setHex(0x1a0805);
+        } else {
+            this.scene.fog.color.setHex(this.defaultFogColor);
+            if (this.scene.background && this.scene.background.isColor) this.scene.background.setHex(this.defaultFogColor);
+        }
     }
 
     enforceCaveShell() {
@@ -1742,10 +1758,7 @@ class LevelManager {
         if (info.isCaveFloor && !this.caveGroup) this.buildCave();
         if (this.caveGroup) this.caveGroup.position.x = this.caveWorldOffset;
         if (this.caveGroup) this.caveGroup.visible = info.isCaveFloor;
-        if (this.scene && this.scene.fog) {
-            if (this.defaultFogColor === undefined) this.defaultFogColor = this.scene.fog.color.getHex();
-            this.scene.fog.color.setHex(info.isCaveFloor ? 0x1a0805 : this.defaultFogColor);
-        }
+        this.applyCaveAtmosphere(info.isCaveFloor);
         const floorTint = info.isCaveFloor ? 0x6a5248 : info.sector.id === 'alpha' ? 0xd4e2da : info.sector.id === 'beta' ? 0xb99a70 : 0xffffff;
         const wallTint = info.isCaveFloor ? 0x7a5a4a : info.sector.id === 'alpha' ? 0xc8e2d8 : info.sector.id === 'beta' ? 0xd19a58 : 0xffffff;
         if (this.floorMaterial) this.floorMaterial.color.setHex(floorTint);
@@ -2110,6 +2123,9 @@ class LevelManager {
             if (this.isElevatorMoving) {
                 this.gatesGroup.visible = false;
             }
+        }
+        if (this.caveShellHidden) {
+            this.applyCaveAtmosphere(true);
         }
         this.enforceCaveShell();
         this.syncResearchRoomVisibility();

@@ -802,27 +802,6 @@ export class GameManager {
         for (let i = 0; i < count; i++) {
             const z = count === 1 ? 0 : (i - (count - 1) / 2) * 8;
             this.enemyManager.spawnEnemy(-researchNodeSection.bossDistance, z, true, null, this.currentWave, undefined, { dirX: 1, dirZ: 0 });
-            // A 101. szint szerverterme őrzője Gallagher: megkülönböztető, jeges-fehér árnyalat
-            const boss = this.enemyManager.enemies[this.enemyManager.enemies.length - 1];
-            if (this.currentWave === 101 && boss && boss.type === 'boss' && boss.mesh) {
-                boss.isGallagher = true;
-                boss.mesh.traverse(object => {
-                    if (!object.isMesh || !object.material) return;
-                    const materials = Array.isArray(object.material) ? object.material : [object.material];
-                    const tinted = materials.map(material => {
-                        if (!material || !material.color) return material;
-                        const clone = material.clone();
-                        clone.userData.gallagherBaseColor = material.color.getHex();
-                        clone.userData.gallagherBaseEmissive = material.emissive ? material.emissive.getHex() : null;
-                        clone.userData.gallagherBaseEmissiveIntensity = material.emissiveIntensity;
-                        clone.color.lerp(new THREE.Color(0xdfeaff), 0.55);
-                        if (clone.emissive) clone.emissive.setHex(0x2255aa);
-                        if (Array.isArray(boss.ownedMaterials)) boss.ownedMaterials.push(clone);
-                        return clone;
-                    });
-                    object.material = Array.isArray(object.material) ? tinted : tinted[0];
-                });
-            }
         }
     }
 
