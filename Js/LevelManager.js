@@ -1515,10 +1515,9 @@ class LevelManager {
             const half = 1.25;
             const frameMat = new THREE.MeshStandardMaterial({ color: 0x222c32, metalness: 0.5, roughness: 0.6 });
             const armorMat = new THREE.MeshStandardMaterial({ color: 0x141b20, metalness: 0.4, roughness: 0.65 });
-            const glassMat = new THREE.MeshStandardMaterial({ color: 0x2b1016, metalness: 0.38, roughness: 0.2, emissive: 0x500810, emissiveIntensity: 1.1 });
             const warningMat = new THREE.MeshStandardMaterial({ color: 0xff3348, emissive: 0xb80b1e, emissiveIntensity: 0.9, metalness: 0.2, roughness: 0.3 });
             const liftCeilMat = new THREE.MeshStandardMaterial({ color: 0x141b20, metalness: 0.4, roughness: 0.65 });
-            this.cabinTexMats = { wall: armorMat, ceiling: liftCeilMat };
+            this.cabinTexMats = { wall: armorMat, ceiling: liftCeilMat, frame: frameMat, shaft: null };
             const part = (geometry, material, px, py, pz) => {
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.position.set(px, py, pz);
@@ -1536,57 +1535,53 @@ class LevelManager {
             for (const side of [-1, 1]) {
                 part(new THREE.BoxGeometry(0.09, 2.65, 0.72), armorMat, -half, 1.65, side * 0.86);
                 part(new THREE.BoxGeometry(0.09, 2.65, 0.72), armorMat, half, 1.65, side * 0.86);
-                part(new THREE.BoxGeometry(2.38, 2.65, 0.09), armorMat, 0, 1.65, side * half);
-                part(new THREE.BoxGeometry(0.035, 2.25, 0.025), glassMat, -half + 0.052, 1.65, side * 0.86);
-                part(new THREE.BoxGeometry(2.05, 0.035, 0.025), glassMat, 0, 2.92, side * half);
+                // Ablakkal áttört hátsó/első fal: ezen át látszik az akna lefelé menet
+                part(new THREE.BoxGeometry(2.38, 0.975, 0.09), armorMat, 0, 0.8125, side * half);
+                part(new THREE.BoxGeometry(2.38, 0.875, 0.09), armorMat, 0, 2.5375, side * half);
+                part(new THREE.BoxGeometry(0.59, 0.8, 0.09), armorMat, -0.895, 1.7, side * half);
+                part(new THREE.BoxGeometry(0.59, 0.8, 0.09), armorMat, 0.895, 1.7, side * half);
+                part(new THREE.BoxGeometry(1.22, 0.05, 0.12), frameMat, 0, 1.3, side * half);
+                part(new THREE.BoxGeometry(1.22, 0.05, 0.12), frameMat, 0, 2.1, side * half);
             }
             for (const side of [-1, 1]) {
                 const panel = part(new THREE.BoxGeometry(0.08, 2.72, 0.69), armorMat, half - 0.05, 1.63, side * 0.34);
-                part(new THREE.BoxGeometry(0.04, 2.34, 0.035), warningMat, half + 0.005, 1.63, side * 0.34);
                 this.cabinDoorPanels.push({ mesh: panel, side });
             }
             const controlPanel = part(new THREE.BoxGeometry(0.12, 0.75, 0.34), frameMat, -0.72, 1.55, -half + 0.08);
             controlPanel.rotation.y = Math.PI / 2;
             part(new THREE.BoxGeometry(0.035, 0.42, 0.22), warningMat, -0.79, 1.6, -half + 0.1);
-            for (let i = 0; i < 6; i++) {
-                const strip = part(new THREE.BoxGeometry(0.16, 0.025, 0.025), i % 2 ? warningMat : glassMat, -0.95 + i * 0.38, 0.19, 0);
-                strip.rotation.y = Math.PI / 2;
-            }
             const light = new THREE.PointLight(0xff3048, 1.5, 8, 1.8);
             light.position.set(0, 2.8, 0);
             group.add(light);
-            const ceilingLight = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.035, 0.32), warningMat);
-            ceilingLight.position.set(0, 3.14, 0);
-            group.add(ceilingLight);
-            // Lefelé haladáskor felfelé suhanó aknafények: ezek adják a süllyedés érzetét
+            // Lefelé haladáskor a kabin körül felfelé suhanó repedezett kőfalú akna: ez adja a süllyedés érzetét
             const fx = new THREE.Group();
             fx.visible = false;
-            const streakMat = new THREE.MeshBasicMaterial({ color: 0xff4a30, transparent: true, opacity: 0.75, fog: false });
-            const ringMat = new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true, opacity: 0.55, fog: false });
+            const shaftWallMat = new THREE.MeshStandardMaterial({ color: 0x4a2c22, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+            const beamMat = new THREE.MeshStandardMaterial({ color: 0x1a2227, metalness: 0.5, roughness: 0.6 });
+            this.cabinShaftWallMat = shaftWallMat;
             this.cabinFxItems = [];
-            for (let i = 0; i < 46; i++) {
-                const angle = Math.random() * Math.PI * 2;
-                const radius = 2.4 + Math.random() * 3.6;
-                const length = 1.5 + Math.random() * 5.5;
-                const streak = new THREE.Mesh(new THREE.BoxGeometry(0.05, length, 0.05), streakMat);
-                streak.position.set(Math.cos(angle) * radius, Math.random() * 20 - 4, Math.sin(angle) * radius);
-                fx.add(streak);
-                this.cabinFxItems.push(streak);
-            }
-            for (let i = 0; i < 5; i++) {
-                const ring = new THREE.Group();
-                for (const side of [-1, 1]) {
-                    const barA = new THREE.Mesh(new THREE.BoxGeometry(7, 0.12, 0.12), ringMat);
-                    barA.position.z = side * 3.5;
-                    const barB = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 7), ringMat);
-                    barB.position.x = side * 3.5;
-                    ring.add(barA, barB);
+            const shaftHalf = 1.9;
+            const segHeight = 6;
+            for (let seg = 0; seg < 4; seg++) {
+                const segment = new THREE.Group();
+                segment.position.y = -9 + seg * segHeight;
+                for (let k = 0; k < 4; k++) {
+                    const plane = new THREE.Mesh(new THREE.PlaneGeometry(shaftHalf * 2, segHeight), shaftWallMat);
+                    plane.position.set(Math.sin(k * Math.PI / 2) * shaftHalf, 0, Math.cos(k * Math.PI / 2) * shaftHalf);
+                    plane.rotation.y = k * Math.PI / 2 + Math.PI;
+                    segment.add(plane);
                 }
-                ring.position.y = i * 4 - 2;
-                fx.add(ring);
-                this.cabinFxItems.push(ring);
+                const beam = new THREE.Mesh(new THREE.BoxGeometry(shaftHalf * 2 + 0.2, 0.22, 0.22), beamMat);
+                beam.position.set(0, segHeight / 2, shaftHalf - 0.08);
+                segment.add(beam);
+                const beam2 = beam.clone();
+                beam2.position.set(0, segHeight / 2, -shaftHalf + 0.08);
+                segment.add(beam2);
+                fx.add(segment);
+                this.cabinFxItems.push(segment);
             }
             group.add(fx);
+            this.cabinTexMats.shaft = shaftWallMat;
             this.cabinShaftFx = fx;
             this.cabinGlassMats = [frameMat, armorMat];
             this.cabinGroup = group;
@@ -1633,18 +1628,11 @@ class LevelManager {
         this.cabinFxFade = THREE.MathUtils.damp(this.cabinFxFade || 0, fadeTarget, 3, delta);
         const fade = this.cabinFxFade;
         this.cabinShaftFx.visible = fade > 0.02;
-        // Futás közben a kabin falai áttetszők, így látszik a süllyedő akna
-        const opacity = 1 - 0.82 * fade;
-        for (const mat of this.cabinGlassMats) {
-            mat.transparent = fade > 0.02;
-            mat.opacity = opacity;
-            mat.depthWrite = fade < 0.5;
-        }
         if (!this.cabinShaftFx.visible) return;
-        const rise = Math.max(this.elevatorSpeed, 0.2) * 12.0 * delta;
+        const rise = Math.max(this.elevatorSpeed, 0.2) * 7.0 * delta;
         for (const item of this.cabinFxItems) {
             item.position.y += rise;
-            if (item.position.y > 16) item.position.y -= 20;
+            if (item.position.y > 15) item.position.y -= 24;
         }
     }
 
@@ -1708,6 +1696,17 @@ class LevelManager {
             mats.wall.map = tex;
             mats.wall.color.setHex(0x8c8c8c);
             mats.wall.needsUpdate = true;
+        });
+        this.loadCaveTexture('liftWall', (tex) => {
+            mats.frame.map = tex;
+            mats.frame.color.setHex(0x8c8c8c);
+            mats.frame.needsUpdate = true;
+        });
+        this.loadCaveTexture('floorCracked', (tex) => {
+            if (!mats.shaft) return;
+            mats.shaft.map = tex;
+            mats.shaft.color.setHex(0xe0d6d0);
+            mats.shaft.needsUpdate = true;
         });
         this.loadCaveTexture('liftCeiling', (tex) => {
             mats.ceiling.map = tex;
@@ -1909,8 +1908,8 @@ class LevelManager {
                     box(c, tunnelHalfWidth * 2, depthCenter, depthLength, wallHeight - 0.8, 1.6, deepRockMat, false);
                     box(c, tunnelHalfWidth * 2, tunnelDepthEnd + 0.25, 0.5, wallHeight / 2, wallHeight, tunnelDarkMat, true);
                     const glow = place(c, tunnelDepthEnd - 0.1);
-                    const glowPanel = new THREE.Mesh(new THREE.PlaneGeometry(tunnelHalfWidth * 1.7, 6.5), tunnelGlowMat);
-                    glowPanel.position.set(glow.x, 3.4, glow.z);
+                    const glowPanel = new THREE.Mesh(new THREE.PlaneGeometry(tunnelHalfWidth * 2, wallHeight), tunnelGlowMat);
+                    glowPanel.position.set(glow.x, wallHeight / 2, glow.z);
                     if (!alongX) glowPanel.rotation.y = Math.PI / 2;
                     walls.add(glowPanel);
                     // Szabálytalan sziklák: a járat szélei, boltozata és szája nem egyenes
@@ -1995,21 +1994,49 @@ class LevelManager {
                 group.add(crystal);
             }
         }
+        // A barlangi lift: panelburkolatú padlólemez és a mennyezet fölé nyúló, könnyű szerkezetű lift akna
+        const liftPanelMat = new THREE.MeshStandardMaterial({ color: 0x4a5258, metalness: 0.3, roughness: 0.7, side: THREE.DoubleSide });
+        const liftFrameMat = new THREE.MeshStandardMaterial({ color: 0x222c32, metalness: 0.5, roughness: 0.6 });
+        useTexture('liftWall', (tex) => {
+            liftPanelMat.map = tex; liftPanelMat.color.setHex(0x9a9a9a); liftPanelMat.needsUpdate = true;
+            liftFrameMat.map = tex; liftFrameMat.color.setHex(0x8c8c8c); liftFrameMat.needsUpdate = true;
+        });
+        const pad = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.06, 4.4), liftPanelMat);
+        pad.position.set(0, 0.03, 0);
+        group.add(pad);
+        const shaft = new THREE.Group();
+        const shaftHalf = 1.4;
+        const bayHeight = 1.75;
+        const shaftBottom = 3.3;
+        const shaftTop = 10.8;
+        const bays = Math.ceil((shaftTop - shaftBottom) / bayHeight);
+        const shaftMeshes = (geometry, material, x, y, z, parent) => {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x, y, z);
+            parent.add(mesh);
+            return mesh;
+        };
+        for (let k = 0; k < 4; k++) {
+            const face = new THREE.Group();
+            face.rotation.y = k * Math.PI / 2;
+            shaftMeshes(new THREE.BoxGeometry(0.12, shaftTop - shaftBottom, 0.12), liftFrameMat, shaftHalf, (shaftTop + shaftBottom) / 2, shaftHalf, face);
+            for (let b = 0; b <= bays; b++) {
+                shaftMeshes(new THREE.BoxGeometry(shaftHalf * 2, 0.09, 0.09), liftFrameMat, 0, shaftBottom + b * bayHeight, shaftHalf, face);
+            }
+            for (let b = 0; b < bays; b++) {
+                const y = shaftBottom + (b + 0.5) * bayHeight;
+                if ((b + k) % 2 === 0) {
+                    shaftMeshes(new THREE.BoxGeometry(shaftHalf * 2 - 0.12, bayHeight - 0.1, 0.04), liftPanelMat, 0, y, shaftHalf, face);
+                } else {
+                    const brace = shaftMeshes(new THREE.BoxGeometry(Math.hypot(shaftHalf * 2, bayHeight), 0.06, 0.06), liftFrameMat, 0, y, shaftHalf, face);
+                    brace.rotation.z = Math.atan2(bayHeight, shaftHalf * 2) * (b % 2 ? 1 : -1);
+                }
+            }
+            shaft.add(face);
+        }
+        group.add(shaft);
         group.add(new THREE.AmbientLight(0xd8987c, 4.2));
 
-        const fissureMat = new THREE.MeshBasicMaterial({ color: 0xff5428, transparent: true, opacity: 0.62 });
-        for (let i = 0; i < 7; i++) {
-            const x = (Math.random() - 0.5) * 26;
-            const z = (Math.random() - 0.5) * 26;
-            const points = [
-                new THREE.Vector3(x - 2.2, 0.012, z - 0.8),
-                new THREE.Vector3(x - 0.8, 0.012, z + 0.2),
-                new THREE.Vector3(x + 0.4, 0.012, z - 0.15),
-                new THREE.Vector3(x + 2.0, 0.012, z + 1.0)
-            ];
-            const vein = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, 0.035, 5, false), fissureMat);
-            group.add(vein);
-        }
         const coreGlow = new THREE.PointLight(0xff5a2a, 45, 50, 1.5);
         coreGlow.position.set(0, 1.2, 0);
         group.add(coreGlow);
