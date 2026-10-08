@@ -17,6 +17,7 @@ export class GameManager {
         this.researchVisitedFloor = 0;
         this.nodeState = 'none';
         this.finalLiftStarted = false;
+        this.liftPassengerLock = false;
         this.pendingGateArrival = false;
         this.pendingTargetFloor = null;
         this.enemiesToSpawn = 5;
@@ -61,6 +62,8 @@ export class GameManager {
         this.elevatorTimer = 0;
         this.elevatorExtraTime = 0;
         this.caveReinforcementTimer = 0;
+        this.caveBossesLeft = 0;
+        this.caveBossClock = 0;
 
         this.player = null;
         this.levelManager = null;
@@ -198,6 +201,7 @@ export class GameManager {
         this.enemySpawnTimer = 0;
         this.isElevating = false;
         this.elevatorPhase = 'idle';
+        this.liftPassengerLock = false;
         if (this.waveTimeout) {
             clearTimeout(this.waveTimeout);
             this.waveTimeout = null;
@@ -360,6 +364,7 @@ export class GameManager {
 
         this.isElevating = false;
         this.elevatorPhase = 'idle';
+        this.liftPassengerLock = false;
         EventBus.emit('STOP_AUDIO', { id: 'elevatorMove' });
         EventBus.emit('STOP_AUDIO', { id: 'elevatorStop' });
         EventBus.emit('STOP_AUDIO', { id: 'gateOpen' });
@@ -506,10 +511,13 @@ export class GameManager {
             this.pendingAggressiveSpawns = 0;
             const floorInfo = getCampaignFloorInfo(this.currentWave);
             const bossCount = floorInfo.bossCount;
-            const initialSpawns = floorInfo.isCaveFloor ? bossCount + 10 : this.enemiesToSpawn;
+            const initialSpawns = floorInfo.isCaveFloor ? 10 : this.enemiesToSpawn + bossCount;
             this.caveReinforcementTimer = 4;
+            // A barlangban a Nexus Node-ok nem egyszerre, hanem időben eltolva érkeznek
+            this.caveBossesLeft = floorInfo.isCaveFloor ? bossCount : 0;
+            this.caveBossClock = 0;
             for (let i = 0; i < initialSpawns; i++) {
-                let isBoss = i < bossCount;
+                let isBoss = !floorInfo.isCaveFloor && i < bossCount;
                 this.pendingEnemySpawns.push({ isBoss, forceType: null });
                 this.pendingAggressiveSpawns++;
             }
@@ -537,7 +545,7 @@ export class GameManager {
     }
 
     isCaveBattleOver() {
-        return this.getAliveBossCount() === 0 &&
+        return this.getAliveBossCount() === 0 && !(this.caveBossesLeft > 0) &&
             !this.pendingEnemySpawns.some(spawn => spawn.isBoss);
     }
 
@@ -545,6 +553,18 @@ export class GameManager {
     updateCaveReinforcements(delta) {
         if (!this.isWaveActive || !this.enemyManager || this.currentWave !== 102) return;
         if (this.isCaveBattleOver()) return;
+        if (this.caveBossesLeft > 0) {
+            this.caveBossClock += delta;
+            const bossTotal = getCampaignFloorInfo(this.currentWave).bossCount;
+            const arrivedBosses = bossTotal - this.caveBossesLeft;
+            // 1. Node 3 mp után, a következők 28 mp-es időközzel
+            if (this.caveBossClock >= 3 + arrivedBosses * 28) {
+                this.caveBossesLeft--;
+                this.pendingEnemySpawns.unshift({ isBoss: true, forceType: null });
+                this.pendingAggressiveSpawns++;
+                this.enemySpawnTimer = 0;
+            }
+        }
         this.caveReinforcementTimer -= delta;
         if (this.caveReinforcementTimer > 0) return;
         this.caveReinforcementTimer = 2.5;
@@ -554,6 +574,11 @@ export class GameManager {
         const forceType = types[Math.floor(Math.random() * types.length)];
         this.pendingEnemySpawns.push({ isBoss: false, forceType });
         if (forceType !== 'crawler') this.pendingAggressiveSpawns++;
+        const extra = 1 + Math.floor(Math.random() * 2);
+        for (let n = 0; n < extra && smallEnemies + this.pendingEnemySpawns.length < 18; n++) {
+            this.pendingEnemySpawns.push({ isBoss: false, forceType: null });
+            this.pendingAggressiveSpawns++;
+        }
     }
 
     spawnQueuedEnemies(delta) {
@@ -562,18 +587,26 @@ export class GameManager {
         this.enemySpawnTimer = Math.max(0, this.enemySpawnTimer - delta);
         if (this.enemySpawnTimer > 0 || this.enemyManager.enemies.length >= this.maxConcurrentEnemies) return;
 
-        const nextSpawn = this.pendingEnemySpawns.shift();
-        if (nextSpawn.forceType !== 'crawler') this.pendingAggressiveSpawns--;
-        const spawnPosition = this.enemyManager.getEdgeSpawnPosition(nextSpawn.isBoss ? 'boss' : null);
-        this.enemyManager.spawnEnemy(
-            spawnPosition.x,
-            spawnPosition.z,
-            nextSpawn.isBoss,
-            nextSpawn.forceType,
-            this.currentWave,
-            undefined,
-            spawnPosition
-        );
+        // Csak a barlangban érkezhet egyszerre több ellenfél (különböző járatokból)
+        const batchSize = this.currentWave === 102 ? 2 + Math.floor(Math.random() * 3) : 1;
+        for (let n = 0; n < batchSize && this.pendingEnemySpawns.length > 0; n++) {
+            if (this.enemyManager.enemies.length >= this.maxConcurrentEnemies) break;
+            const nextSpawn = this.pendingEnemySpawns.shift();
+            if (nextSpawn.isBoss && this.currentWave === 102) {
+                EventBus.emit('CAMERA_SHAKE', 2.0);
+            }
+            if (nextSpawn.forceType !== 'crawler') this.pendingAggressiveSpawns--;
+            const spawnPosition = this.enemyManager.getEdgeSpawnPosition(nextSpawn.isBoss ? 'boss' : null);
+            this.enemyManager.spawnEnemy(
+                spawnPosition.x,
+                spawnPosition.z,
+                nextSpawn.isBoss,
+                nextSpawn.forceType,
+                this.currentWave,
+                undefined,
+                spawnPosition
+            );
+        }
         this.enemySpawnTimer = this.enemySpawnInterval;
     }
 
@@ -662,17 +695,36 @@ export class GameManager {
         this.updateTerminalProximity();
     }
 
-    setTerminalPromptVisible(visible) {
-        if (this.terminalPromptVisible === visible) return;
+    setTerminalPromptVisible(visible, maglift = false) {
+        if (this.terminalPromptVisible === visible && this.terminalPromptMaglift === maglift) return;
         this.terminalPromptVisible = visible;
+        this.terminalPromptMaglift = maglift;
         EventBus.emit('SHOW_INTERACT_PROMPT', {
             visible,
             type: 'terminal',
+            maglift,
             researchFloor: null
         });
     }
 
+    // A 101. szinten, a feloldott kijárat után a barlangba vezető egyszemélyes Maglift áll a helyiségben
+    isFinalLiftAvailable() {
+        return !this.finalLiftStarted && this.currentWave === 101 && this.nodeState === 'unlocked' &&
+            this.researchFloorActive && this.gameState === 'PLAYING' && !this.isWaveActive &&
+            !!this.levelManager && !!this.levelManager.finalPodRoomActive &&
+            !!this.player && !!this.player.camera;
+    }
+
+    isNearFinalLift() {
+        const { x, z } = this.player.camera.position;
+        return Math.hypot(x + sectorHallCenter, z) <= 3.2 && this.isFacingTerminalDoor(0, -sectorHallCenter);
+    }
+
     updateTerminalProximity() {
+        if (this.isFinalLiftAvailable()) {
+            this.setTerminalPromptVisible(this.isNearFinalLift(), true);
+            return;
+        }
         if (this.researchFloorActive && this.nodeState === 'unlocked' && this.player && this.player.camera) {
             const { x, z } = this.player.camera.position;
             const doorwayZ = 4.45 * (3.2 / 9.8);
@@ -705,6 +757,14 @@ export class GameManager {
 
     tryActivateTerminal() {
         if (!this.player || !this.player.camera) return;
+        if (this.isFinalLiftAvailable()) {
+            if (this.isNearFinalLift()) {
+                EventBus.emit('CONSUME_INTERACTION');
+                this.setTerminalPromptVisible(false);
+                this.beginFinalLiftEntry();
+            }
+            return;
+        }
         if (this.researchFloorActive && this.gameState === 'PLAYING') {
             if (this.nodeState === 'unlocked') {
                 const { x, z } = this.player.camera.position;
@@ -805,18 +865,34 @@ export class GameManager {
         }
     }
 
-    updateFinalLiftEntry() {
-        if (this.finalLiftStarted || this.currentWave !== 101 || this.nodeState !== 'unlocked' ||
-            !this.researchFloorActive || this.gameState !== 'PLAYING' || this.isWaveActive ||
-            !this.levelManager || !this.levelManager.finalPodRoomActive ||
-            !this.player || !this.player.camera) return;
-
-        const { x, z } = this.player.camera.position;
-        if (Math.hypot(x + sectorHallCenter, z) > 0.82) return;
-
+    // Interakció után a játékos magától besétál a kabin közepére, ott megáll, és csak ezután indul a lift
+    beginFinalLiftEntry() {
         this.finalLiftStarted = true;
+        this.gameState = 'TERMINAL_TRANSITION';
+        this.terminalSequence = 'lift-walking';
+        this.terminalSequenceTime = 0;
         this.player.playerVelX = 0;
         this.player.playerVelZ = 0;
+        const position = this.player.camera.position;
+        this.terminalMoveFrom = { x: position.x, y: position.y, z: position.z };
+        this.terminalMoveTo = { x: -sectorHallCenter, y: position.y, z: 0 };
+        const distance = Math.hypot(this.terminalMoveTo.x - position.x, this.terminalMoveTo.z - position.z);
+        this.liftWalkDuration = Math.max(0.9, distance / 1.8);
+    }
+
+    updateLiftWalk() {
+        const progress = Math.min(1, this.terminalSequenceTime / this.liftWalkDuration);
+        const eased = progress * progress * (3 - 2 * progress);
+        const from = this.terminalMoveFrom, to = this.terminalMoveTo;
+        this.player.camera.position.x = from.x + (to.x - from.x) * eased;
+        this.player.camera.position.z = from.z + (to.z - from.z) * eased;
+        if (progress < 1) return;
+        this.terminalSequence = 'idle';
+        this.gameState = 'PLAYING';
+        this.player.playerVelX = 0;
+        this.player.playerVelZ = 0;
+        this.liftPassengerLock = true;
+        this.liftPassengerPos = null;
         EventBus.emit('MAGLIFT_DEPARTING');
         this.startWaveCountdown(false);
     }
@@ -920,6 +996,11 @@ export class GameManager {
 
     updateTerminalSequence(delta) {
         if (!this.player || !this.player.camera || !this.levelManager) return;
+        if (this.terminalSequence === 'lift-walking') {
+            this.terminalSequenceTime += delta;
+            this.updateLiftWalk();
+            return;
+        }
         if (this.weaponSystem) this.weaponSystem.updateTerminalTransition(delta);
         this.terminalSequenceTime += delta;
         const activePodDoorProgress = this.activePodIsSector
@@ -1019,12 +1100,21 @@ export class GameManager {
 
         this.updateTerminalProximity();
         this.updateNodeSection();
-        this.updateFinalLiftEntry();
         this.updateResearchHubProximity();
 
         // Ipari felvonó és zsilipkapu szekvencia a szintek között
         if (this.isElevating) {
             this.elevatorTimer += delta;
+
+            // A kabinba beszállt játékos a lift útja alatt egy helyben áll
+            if (this.liftPassengerLock && this.player && this.player.camera) {
+                const camPos = this.player.camera.position;
+                if (!this.liftPassengerPos) this.liftPassengerPos = { x: camPos.x, z: camPos.z };
+                camPos.x = this.liftPassengerPos.x;
+                camPos.z = this.liftPassengerPos.z;
+                this.player.playerVelX = 0;
+                this.player.playerVelZ = 0;
+            }
 
             // 1. Fázis: Lift süllyed a mélybe (6.5 mp dübörgés és fal-textúra görgetés)
             if (this.elevatorPhase === 'moving') {
@@ -1033,7 +1123,9 @@ export class GameManager {
                     EventBus.emit('STOP_AUDIO', { id: 'elevatorMove' });
                     EventBus.emit('PLAY_SOUND', { id: 'elevatorStop' });
                     EventBus.emit('STOP_ELEVATOR_MOVE');
-                    EventBus.emit('CAMERA_DIP', { duration: 0.7 });
+                    EventBus.emit('CAMERA_DIP', { duration: this.currentWave === 102 ? 1.1 : 0.7 });
+                    if (this.currentWave === 102) EventBus.emit('CAMERA_SHAKE', 0.9);
+                    this.liftPassengerLock = false;
                     EventBus.emit('ELEVATOR_ARRIVED', { wave: this.currentWave });
                 }
             } 

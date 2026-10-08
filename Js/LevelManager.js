@@ -113,6 +113,16 @@ class LevelManager {
                 this.caveWorldOffset = -sectorHallCenter;
                 if (!this.caveGroup) this.buildCave();
                 this.setCaveShell(true);
+                // Megérkezéskor azonnal kinyílik a kabin ajtaja, és kilátni a barlangra
+                this.cabinDoorTarget = 0;
+            }
+        });
+        EventBus.on('WAVE_STARTING', (data) => {
+            if (data && data.wave >= 100) this.preloadCaveTextures();
+            // A barlang felépítése a lift útja alatt történik, nem a megérkezés pillanatában
+            if (data && data.isCave && !this.caveGroup) {
+                this.caveWorldOffset = -sectorHallCenter;
+                this.buildCave();
             }
         });
         EventBus.on('CAMPAIGN_FLOOR_RESET', () => this.setCampaignFloor(1));
@@ -1503,10 +1513,12 @@ class LevelManager {
         if (!this.cabinGroup) {
             const group = new THREE.Group();
             const half = 1.25;
-            const frameMat = new THREE.MeshStandardMaterial({ color: 0x29333a, metalness: 0.88, roughness: 0.27 });
-            const armorMat = new THREE.MeshStandardMaterial({ color: 0x11191f, metalness: 0.72, roughness: 0.38 });
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x222c32, metalness: 0.5, roughness: 0.6 });
+            const armorMat = new THREE.MeshStandardMaterial({ color: 0x141b20, metalness: 0.4, roughness: 0.65 });
             const glassMat = new THREE.MeshStandardMaterial({ color: 0x2b1016, metalness: 0.38, roughness: 0.2, emissive: 0x500810, emissiveIntensity: 1.1 });
-            const warningMat = new THREE.MeshStandardMaterial({ color: 0xff3348, emissive: 0xb80b1e, emissiveIntensity: 1.7, metalness: 0.2, roughness: 0.3 });
+            const warningMat = new THREE.MeshStandardMaterial({ color: 0xff3348, emissive: 0xb80b1e, emissiveIntensity: 0.9, metalness: 0.2, roughness: 0.3 });
+            const liftCeilMat = new THREE.MeshStandardMaterial({ color: 0x141b20, metalness: 0.4, roughness: 0.65 });
+            this.cabinTexMats = { wall: armorMat, ceiling: liftCeilMat };
             const part = (geometry, material, px, py, pz) => {
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.position.set(px, py, pz);
@@ -1515,7 +1527,7 @@ class LevelManager {
             };
             part(new THREE.BoxGeometry(2.65, 0.18, 2.65), armorMat, 0, -0.03, 0);
             part(new THREE.BoxGeometry(2.55, 0.08, 2.55), frameMat, 0, 0.08, 0);
-            part(new THREE.BoxGeometry(2.62, 0.12, 2.62), frameMat, 0, 3.24, 0);
+            part(new THREE.BoxGeometry(2.62, 0.12, 2.62), liftCeilMat, 0, 3.24, 0);
             for (const sx of [-1, 1]) {
                 for (const sz of [-1, 1]) {
                     part(new THREE.BoxGeometry(0.14, 3.2, 0.14), frameMat, sx * half, 1.65, sz * half);
@@ -1540,14 +1552,46 @@ class LevelManager {
                 const strip = part(new THREE.BoxGeometry(0.16, 0.025, 0.025), i % 2 ? warningMat : glassMat, -0.95 + i * 0.38, 0.19, 0);
                 strip.rotation.y = Math.PI / 2;
             }
-            const light = new THREE.PointLight(0xff3048, 2.4, 9, 1.6);
+            const light = new THREE.PointLight(0xff3048, 1.5, 8, 1.8);
             light.position.set(0, 2.8, 0);
             group.add(light);
             const ceilingLight = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.035, 0.32), warningMat);
             ceilingLight.position.set(0, 3.14, 0);
             group.add(ceilingLight);
+            // Lefelé haladáskor felfelé suhanó aknafények: ezek adják a süllyedés érzetét
+            const fx = new THREE.Group();
+            fx.visible = false;
+            const streakMat = new THREE.MeshBasicMaterial({ color: 0xff4a30, transparent: true, opacity: 0.75, fog: false });
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xff2a1a, transparent: true, opacity: 0.55, fog: false });
+            this.cabinFxItems = [];
+            for (let i = 0; i < 46; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 2.4 + Math.random() * 3.6;
+                const length = 1.5 + Math.random() * 5.5;
+                const streak = new THREE.Mesh(new THREE.BoxGeometry(0.05, length, 0.05), streakMat);
+                streak.position.set(Math.cos(angle) * radius, Math.random() * 20 - 4, Math.sin(angle) * radius);
+                fx.add(streak);
+                this.cabinFxItems.push(streak);
+            }
+            for (let i = 0; i < 5; i++) {
+                const ring = new THREE.Group();
+                for (const side of [-1, 1]) {
+                    const barA = new THREE.Mesh(new THREE.BoxGeometry(7, 0.12, 0.12), ringMat);
+                    barA.position.z = side * 3.5;
+                    const barB = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 7), ringMat);
+                    barB.position.x = side * 3.5;
+                    ring.add(barA, barB);
+                }
+                ring.position.y = i * 4 - 2;
+                fx.add(ring);
+                this.cabinFxItems.push(ring);
+            }
+            group.add(fx);
+            this.cabinShaftFx = fx;
+            this.cabinGlassMats = [frameMat, armorMat];
             this.cabinGroup = group;
             this.scene.add(group);
+            if (this.caveTexturesRequested) this.applyCabinTextures();
         }
         this.cabinGroup.position.set(x, 0, z);
         this.cabinGroup.visible = true;
@@ -1555,6 +1599,53 @@ class LevelManager {
         this.cabinDoorProgress = 0;
         this.cabinDoorTarget = 0;
         this.updateCabinDoorPose();
+    }
+
+    // Hullámzó, véletlenszerűen villódzó barlangfények és időnkénti kisebb földrengések
+    updateCaveEffects(delta) {
+        if (!this.caveShellHidden || !this.caveFlicker) return;
+        const now = (this.caveFxTime = (this.caveFxTime || 0) + delta);
+        for (const f of this.caveFlicker) {
+            f.next -= delta;
+            if (f.next <= 0) {
+                f.next = 0.4 + Math.random() * 2.2;
+                f.kick = (Math.random() - 0.5) * 0.7;
+            }
+            f.kick = THREE.MathUtils.damp(f.kick, 0, 3, delta);
+            const wave = Math.sin(now * f.speed + f.phase) * 0.18 + Math.sin(now * f.speed * 2.7 + f.phase * 1.9) * 0.1;
+            f.light.intensity = f.base * Math.max(0.3, 1 + wave + f.kick);
+        }
+        if (this.caveTunnelGlowMat) {
+            this.caveTunnelGlowMat.opacity = (this.caveGateTextured ? 0.85 : 0.5) + Math.sin(now * 1.3) * 0.08 + Math.sin(now * 3.1 + 1) * 0.06;
+        }
+        if (this.isElevatorMoving) return;
+        this.caveRumbleTimer = (this.caveRumbleTimer === undefined ? 6 : this.caveRumbleTimer) - delta;
+        if (this.caveRumbleTimer <= 0) {
+            this.caveRumbleTimer = 6 + Math.random() * 9;
+            EventBus.emit('CAMERA_SHAKE', 0.12 + Math.random() * 0.14);
+        }
+    }
+
+    updateCabinShaftFx(delta) {
+        if (!this.cabinShaftFx) return;
+        const active = !!this.cabinGroup && this.cabinGroup.visible && this.isElevatorMoving && !this.caveShellHidden;
+        const fadeTarget = active ? 1 : 0;
+        this.cabinFxFade = THREE.MathUtils.damp(this.cabinFxFade || 0, fadeTarget, 3, delta);
+        const fade = this.cabinFxFade;
+        this.cabinShaftFx.visible = fade > 0.02;
+        // Futás közben a kabin falai áttetszők, így látszik a süllyedő akna
+        const opacity = 1 - 0.82 * fade;
+        for (const mat of this.cabinGlassMats) {
+            mat.transparent = fade > 0.02;
+            mat.opacity = opacity;
+            mat.depthWrite = fade < 0.5;
+        }
+        if (!this.cabinShaftFx.visible) return;
+        const rise = Math.max(this.elevatorSpeed, 0.2) * 12.0 * delta;
+        for (const item of this.cabinFxItems) {
+            item.position.y += rise;
+            if (item.position.y > 16) item.position.y -= 20;
+        }
     }
 
     hideSingleCabin() {
@@ -1566,6 +1657,63 @@ class LevelManager {
         for (const { mesh, side } of this.cabinDoorPanels) {
             mesh.position.z = side * (0.78 - this.cabinDoorProgress * 0.44);
         }
+    }
+
+    // A barlang textúrái külső képek (2048 px): csak a barlang előtt töltődnek be, és betöltésig a generált textúra marad
+    loadCaveTexture(key, onReady) {
+        const base = 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/db78bfe9900ca50572496fface14e2f09d6862cf/Pictures/';
+        const files = {
+            wall: 'barlang%20fal.jpg',
+            crystal: 'barlang%20krist%C3%A1ly.jpg',
+            floorCracked: 'barlang%20talaj%20reped%C3%A9ssel.jpg',
+            floor: 'barlang%20talaj.jpg',
+            stalactite: 'barlang%20cseppk%C5%91.jpg',
+            tunnel: 'NEW:barlang%20j%C3%A1rat.jpg',
+            liftWall: 'NEW:barlang%20lift%20fal.jpg',
+            liftCeiling: 'NEW:barlang%20lift%20mennyezet.jpg'
+        };
+        const newBase = 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/46399bd0bc0c099bef3a82537ef5d40017b595e2/Pictures/';
+        if (!this.caveTextureCache) this.caveTextureCache = {};
+        let entry = this.caveTextureCache[key];
+        if (!entry) {
+            entry = { tex: null, waiting: [] };
+            this.caveTextureCache[key] = entry;
+            const file = files[key];
+            const url = file.startsWith('NEW:') ? newBase + file.slice(4) : base + file;
+            new THREE.TextureLoader().load(url, (tex) => {
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.encoding = THREE.sRGBEncoding;
+                tex.anisotropy = 4;
+                entry.tex = tex;
+                for (const fn of entry.waiting) fn(tex);
+                entry.waiting.length = 0;
+            }, undefined, () => { entry.waiting.length = 0; });
+        }
+        if (entry.tex) onReady(entry.tex);
+        else if (onReady) entry.waiting.push(onReady);
+    }
+
+    preloadCaveTextures() {
+        for (const key of ['wall', 'crystal', 'floorCracked', 'floor', 'stalactite', 'tunnel', 'liftWall', 'liftCeiling']) this.loadCaveTexture(key, () => {});
+        this.caveTexturesRequested = true;
+        this.applyCabinTextures();
+    }
+
+    // A barlangba vezető lift belső fala és mennyezete
+    applyCabinTextures() {
+        const mats = this.cabinTexMats;
+        if (!mats) return;
+        this.loadCaveTexture('liftWall', (tex) => {
+            mats.wall.map = tex;
+            mats.wall.color.setHex(0x8c8c8c);
+            mats.wall.needsUpdate = true;
+        });
+        this.loadCaveTexture('liftCeiling', (tex) => {
+            mats.ceiling.map = tex;
+            mats.ceiling.color.setHex(0x8c8c8c);
+            mats.ceiling.needsUpdate = true;
+        });
     }
 
     createCaveTexture(base, fleck, seed) {
@@ -1601,24 +1749,74 @@ class LevelManager {
         const group = new THREE.Group();
         group.position.x = this.caveWorldOffset;
         const collisions = [];
-        const rockTexture = this.createCaveTexture('#38251e', 'rgba(181,73,35,0.32)', 9817);
-        const floorTexture = this.createCaveTexture('#32241f', 'rgba(161,99,67,0.18)', 12661);
+        const rockTexture = this.createCaveTexture('#7d5a49', 'rgba(210,95,50,0.34)', 9817);
+        const floorTexture = this.createCaveTexture('#775847', 'rgba(190,120,85,0.22)', 12661);
         const rockMat = new THREE.MeshStandardMaterial({
-            color: 0xa89a8e, map: rockTexture,
+            color: 0xe0cfc2, map: rockTexture,
             roughness: 0.94, metalness: 0.02, flatShading: true
         });
         const deepRockMat = new THREE.MeshStandardMaterial({
-            color: 0x756258, map: rockTexture,
+            color: 0xb49f90, map: rockTexture,
             roughness: 0.97, metalness: 0, flatShading: true
         });
         const floorMat = new THREE.MeshStandardMaterial({
-            color: 0x8d7b6e, map: floorTexture,
+            color: 0xcdb8a8, map: floorTexture,
             roughness: 0.96, metalness: 0.02, side: THREE.DoubleSide
         });
-        const ground = new THREE.Mesh(new THREE.PlaneGeometry(70, 70, 1, 1), floorMat);
+        const scaleUv = (geometry, factor) => {
+            const uv = geometry.attributes.uv;
+            for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * factor, uv.getY(i) * factor);
+            return geometry;
+        };
+        const ground = new THREE.Mesh(scaleUv(new THREE.PlaneGeometry(70, 70, 1, 1), 9), floorMat);
         ground.rotation.x = -Math.PI / 2;
         ground.position.y = -0.025;
         group.add(ground);
+        const stalactiteMat = new THREE.MeshStandardMaterial({ color: 0xc9a88f, map: rockTexture, roughness: 0.95, metalness: 0.02, flatShading: true });
+        const crystalMats = [
+            new THREE.MeshStandardMaterial({ color: 0x2c9c88, emissive: 0x12b89c, emissiveIntensity: 1.2, roughness: 0.22, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({ color: 0xe75f2b, emissive: 0xe0471a, emissiveIntensity: 1.2, roughness: 0.28, metalness: 0.05 })
+        ];
+        const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x3a2a24, map: rockTexture, roughness: 1, side: THREE.DoubleSide });
+        // Repedezett, izzó talajfoltok lágy szélű átmenettel a sima talajon
+        const patchCanvas = document.createElement('canvas');
+        patchCanvas.width = patchCanvas.height = 128;
+        const patchCtx = patchCanvas.getContext('2d');
+        const patchGradient = patchCtx.createRadialGradient(64, 64, 8, 64, 64, 62);
+        patchGradient.addColorStop(0, '#fff');
+        patchGradient.addColorStop(0.55, '#bbb');
+        patchGradient.addColorStop(1, '#000');
+        patchCtx.fillStyle = patchGradient;
+        patchCtx.fillRect(0, 0, 128, 128);
+        const patchAlpha = new THREE.CanvasTexture(patchCanvas);
+        const patchMat = new THREE.MeshStandardMaterial({
+            color: 0xcdb8a8, map: floorTexture, alphaMap: patchAlpha, transparent: true, depthWrite: false,
+            roughness: 0.9, metalness: 0.02, polygonOffset: true, polygonOffsetFactor: -2
+        });
+        const patchSpots = [[-14, -9, 9], [10, -17, 8], [17, 8, 10], [-6, 14, 8], [-19, 17, 7], [2, -3, 6], [24, -22, 7], [-24, -20, 8]];
+        for (const [px, pz, size] of patchSpots) {
+            const patch = new THREE.Mesh(scaleUv(new THREE.PlaneGeometry(size * 2, size * 2), size / 4), patchMat);
+            patch.rotation.x = -Math.PI / 2;
+            patch.rotation.z = Math.random() * Math.PI;
+            patch.position.set(px, 0.006, pz);
+            group.add(patch);
+        }
+        // A valódi textúrák betöltődésekor kicserélik a generáltakat
+        const useTexture = (key, apply) => this.loadCaveTexture(key, (tex) => { if (this.caveGroup === group || !this.caveGroup) apply(tex); });
+        useTexture('wall', (tex) => {
+            for (const m of [rockMat, deepRockMat, ceilingMat]) { m.map = tex; m.needsUpdate = true; }
+            rockMat.color.setHex(0xffffff);
+            deepRockMat.color.setHex(0xd8d0cb);
+            ceilingMat.color.setHex(0x9a8a82);
+        });
+        useTexture('floor', (tex) => { floorMat.map = tex; floorMat.color.setHex(0xe6dcd5); floorMat.needsUpdate = true; });
+        useTexture('floorCracked', (tex) => { patchMat.map = tex; patchMat.color.setHex(0xe6dcd5); patchMat.needsUpdate = true; });
+        useTexture('stalactite', (tex) => { stalactiteMat.map = tex; stalactiteMat.color.setHex(0xffffff); stalactiteMat.needsUpdate = true; });
+        useTexture('crystal', (tex) => {
+            for (const m of crystalMats) { m.map = tex; m.emissiveMap = tex; m.color.setHex(0xffffff); m.needsUpdate = true; }
+            crystalMats[0].emissive.setHex(0xa8f0ff);
+            crystalMats[1].emissive.setHex(0xffd890);
+        });
 
         const walls = new THREE.Group();
         walls.visible = false;
@@ -1630,8 +1828,12 @@ class LevelManager {
         }
         wallRockGeo.computeVertexNormals();
         let rockIndex = 0;
+        // A falban lévő járatok (12 db: minden falon 3) középpontjai a fal mentén
+        const tunnelCenters = [-14, 0, 14];
         for (let value = -27; value <= 27; value += 3.1) {
+            const nearTunnel = tunnelCenters.some(c => Math.abs(value - c) < 9.6);
             for (const [x, z] of [[value, -27], [value, 27], [-27, value], [27, value]]) {
+                if (nearTunnel) continue;
                 const rock = new THREE.Mesh(wallRockGeo, rockIndex++ % 3 ? rockMat : deepRockMat);
                 const size = 2.3 + Math.random() * 1.7;
                 rock.position.set(x + (Math.random() - 0.5) * 1.2, 2.2 + Math.random() * 2.0, z + (Math.random() - 0.5) * 1.2);
@@ -1646,21 +1848,114 @@ class LevelManager {
             }
         }
 
+        // A mennyezetről lelógó cseppkövek, közöttük kristályok
         const stalactiteGeo = new THREE.ConeGeometry(1, 1, 7, 2);
-        for (let i = 0; i < 18; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const radius = 22 + Math.random() * 5;
-            const length = 1.4 + Math.random() * 2.6;
-            const spike = new THREE.Mesh(stalactiteGeo, i % 3 ? deepRockMat : rockMat);
-            spike.position.set(Math.cos(angle) * radius, 8.7 - length / 2, Math.sin(angle) * radius);
-            spike.scale.set(0.8 + Math.random() * 1.5, length, 0.8 + Math.random() * 1.5);
+        const ceilingCrystalMats = crystalMats;
+        const crystalGeo = new THREE.ConeGeometry(0.4, 1, 6);
+        for (let i = 0; i < 110; i++) {
+            const x = (Math.random() - 0.5) * 56;
+            const z = (Math.random() - 0.5) * 56;
+            const isCrystal = i % 4 === 0;
+            const length = isCrystal ? 1.2 + Math.random() * 2.2 : 1.2 + Math.random() * 4.2;
+            const spike = new THREE.Mesh(isCrystal ? crystalGeo : stalactiteGeo, isCrystal ? ceilingCrystalMats[(i >> 2) % 2] : stalactiteMat);
+            spike.position.set(x, 9.3 - length / 2, z);
+            const width = isCrystal ? 0.6 + Math.random() * 0.7 : 0.5 + Math.random() * 1.6;
+            spike.scale.set(width, length, width);
             spike.rotation.x = Math.PI;
-            spike.rotation.z = (Math.random() - 0.5) * 0.32;
+            spike.rotation.z = (Math.random() - 0.5) * 0.4;
+            spike.rotation.y = Math.random() * Math.PI;
             walls.add(spike);
         }
+        // Falban lévő járatok: innen jönnek elő az ellenfelek és ezekből ömlik a vörös füst
+        const tunnelGlowMat = new THREE.MeshBasicMaterial({ color: 0xff2a14, transparent: true, opacity: 0.6, side: THREE.DoubleSide });
+        useTexture('tunnel', (tex) => {
+            tunnelGlowMat.map = tex;
+            tunnelGlowMat.color.setHex(0xffffff);
+            tunnelGlowMat.needsUpdate = true;
+            this.caveGateTextured = true;
+        });
+        const tunnelDarkMat = new THREE.MeshBasicMaterial({ color: 0x120303 });
+        const tunnels = [];
+        const addTunnelBox = (cx, cy, cz, sx, sy, sz, material, solid) => {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), material);
+            mesh.position.set(cx, cy, cz);
+            walls.add(mesh);
+            if (solid) {
+                collisions.push(new THREE.Box3(
+                    new THREE.Vector3(cx - sx / 2 + this.caveWorldOffset, 0, cz - sz / 2),
+                    new THREE.Vector3(cx + sx / 2 + this.caveWorldOffset, sy, cz + sz / 2)
+                ));
+            }
+        };
+        const tunnelDepthStart = 25.0, tunnelDepthEnd = 35.0, tunnelHalfWidth = 4.3, blockOuter = 9.4, wallHeight = 9.2;
+        const depthCenter = (tunnelDepthStart + tunnelDepthEnd) / 2, depthLength = tunnelDepthEnd - tunnelDepthStart;
+        for (const wallSign of [-1, 1]) {
+            for (const c of tunnelCenters) {
+                for (const alongX of [true, false]) {
+                    // alongX: a járat a z = ±27 falon nyílik (a fal mentén az x tengely a lateral)
+                    const place = (lateral, depth) => alongX
+                        ? { x: lateral, z: wallSign * depth }
+                        : { x: wallSign * depth, z: lateral };
+                    const box = (lateralCenter, lateralSize, depthCenterValue, depthSize, y, height, material, solid) => {
+                        const p = place(lateralCenter, depthCenterValue);
+                        addTunnelBox(p.x, y, p.z,
+                            alongX ? lateralSize : depthSize, height, alongX ? depthSize : lateralSize, material, solid);
+                    };
+                    const blockWidth = blockOuter - tunnelHalfWidth;
+                    const blockCenter = (blockOuter + tunnelHalfWidth) / 2;
+                    for (const side of [-1, 1]) {
+                        box(c + side * blockCenter, blockWidth, depthCenter, depthLength, wallHeight / 2, wallHeight, deepRockMat, true);
+                    }
+                    box(c, tunnelHalfWidth * 2, depthCenter, depthLength, wallHeight - 0.8, 1.6, deepRockMat, false);
+                    box(c, tunnelHalfWidth * 2, tunnelDepthEnd + 0.25, 0.5, wallHeight / 2, wallHeight, tunnelDarkMat, true);
+                    const glow = place(c, tunnelDepthEnd - 0.1);
+                    const glowPanel = new THREE.Mesh(new THREE.PlaneGeometry(tunnelHalfWidth * 1.7, 6.5), tunnelGlowMat);
+                    glowPanel.position.set(glow.x, 3.4, glow.z);
+                    if (!alongX) glowPanel.rotation.y = Math.PI / 2;
+                    walls.add(glowPanel);
+                    // Szabálytalan sziklák: a járat szélei, boltozata és szája nem egyenes
+                    const tunnelRock = (lateral, depth, y, size) => {
+                        const p = place(lateral, depth);
+                        const rock = new THREE.Mesh(wallRockGeo, Math.random() < 0.5 ? rockMat : deepRockMat);
+                        rock.position.set(p.x, y, p.z);
+                        rock.scale.set(size * (0.7 + Math.random() * 0.7), size * (0.8 + Math.random() * 0.9), size * (0.7 + Math.random() * 0.7));
+                        rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+                        walls.add(rock);
+                    };
+                    // Nagy, egymásra torlódó sziklák: a járat oldalait és boltozatát teljesen eltakarják
+                    for (let d = tunnelDepthStart - 1.0; d < tunnelDepthStart + 7; d += 2.0 + Math.random() * 0.8) {
+                        for (const side of [-1, 1]) {
+                            for (let y = 1.0; y < wallHeight + 0.5; y += 2.3 + Math.random() * 0.8) {
+                                const size = 2.2 + Math.random() * 1.2;
+                                tunnelRock(c + side * (tunnelHalfWidth + size * 0.55 + (Math.random() - 0.5) * 0.8), d + (Math.random() - 0.5) * 0.8, y, size);
+                            }
+                        }
+                        for (let l = -tunnelHalfWidth; l <= tunnelHalfWidth + 0.1; l += 2.6) {
+                            tunnelRock(c + l + (Math.random() - 0.5) * 1.2, d, 8.2 + Math.random() * 1.0, 2.0 + Math.random() * 1.2);
+                        }
+                    }
+                    // A járat szája: nagy boltív-sziklák és a sarkoknál kiálló tömbök
+                    for (let k = 0; k < 9; k++) {
+                        const archAngle = Math.PI * k / 8;
+                        const size = 2.4 + Math.random() * 1.4;
+                        tunnelRock(c + Math.cos(archAngle) * (tunnelHalfWidth + size * 0.45),
+                            tunnelDepthStart - 0.6 + Math.random() * 1.0,
+                            wallHeight * 0.45 + Math.sin(archAngle) * (wallHeight * 0.55), size);
+                    }
+                    tunnels.push({
+                        lateral: c,
+                        outX: alongX ? 0 : wallSign,
+                        outZ: alongX ? wallSign : 0,
+                        isXAxis: alongX,
+                        mouth: place(c, 27)
+                    });
+                }
+            }
+        }
+        this.caveTunnels = tunnels;
         const ceiling = new THREE.Mesh(
-            new THREE.PlaneGeometry(70, 70),
-            new THREE.MeshStandardMaterial({ color: 0x17100e, map: rockTexture, roughness: 1, side: THREE.DoubleSide })
+            scaleUv(new THREE.PlaneGeometry(70, 70), 8),
+            ceilingMat
         );
         ceiling.rotation.x = Math.PI / 2;
         ceiling.position.y = 9.2;
@@ -1668,10 +1963,8 @@ class LevelManager {
         group.add(walls);
         this.caveWalls = walls;
 
-        const glowMats = [
-            new THREE.MeshStandardMaterial({ color: 0x2c9c88, emissive: 0x087665, emissiveIntensity: 0.9, roughness: 0.22, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ color: 0xe75f2b, emissive: 0x9c260d, emissiveIntensity: 1.0, roughness: 0.28, metalness: 0.05 })
-        ];
+        const caveFlicker = [];
+        const glowMats = crystalMats;
         for (let i = 0; i < 8; i++) {
             const angle = i * Math.PI * 2 / 8;
             const x = Math.cos(angle) * (13 + i % 3 * 2.5);
@@ -1684,10 +1977,25 @@ class LevelManager {
                 crystal.rotation.z = (shard - 1) * 0.14;
                 group.add(crystal);
             }
-            const light = new THREE.PointLight(i % 2 ? 0x26b89e : 0xff5327, 0.85, 13, 2);
+            const light = new THREE.PointLight(i % 2 ? 0x2fd8bb : 0xff6034, 38, 32, 1.5);
             light.position.set(x, 1.5, z);
             group.add(light);
+            caveFlicker.push({ light, base: 38, phase: Math.random() * 10, speed: 0.7 + Math.random() * 1.6, next: 0, kick: 0 });
         }
+
+        // Falak mentén álló, csak világító kristálycsoportok (fényforrás nélkül, hogy olcsó maradjon)
+        for (let i = 0; i < 14; i++) {
+            const angle = (i + 0.5) * Math.PI * 2 / 14;
+            const radius = 21 + (i % 3);
+            for (let shard = 0; shard < 2; shard++) {
+                const height = 1.6 + ((i + shard) % 3) * 0.9;
+                const crystal = new THREE.Mesh(new THREE.ConeGeometry(0.34 + shard * 0.1, height, 6), glowMats[(i + shard) % 2]);
+                crystal.position.set(Math.cos(angle) * radius + shard * 0.5, height / 2, Math.sin(angle) * radius + shard * 0.3);
+                crystal.rotation.z = (shard - 0.5) * 0.2;
+                group.add(crystal);
+            }
+        }
+        group.add(new THREE.AmbientLight(0xd8987c, 4.2));
 
         const fissureMat = new THREE.MeshBasicMaterial({ color: 0xff5428, transparent: true, opacity: 0.62 });
         for (let i = 0; i < 7; i++) {
@@ -1702,9 +2010,12 @@ class LevelManager {
             const vein = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, 0.035, 5, false), fissureMat);
             group.add(vein);
         }
-        const coreGlow = new THREE.PointLight(0xff4a21, 0.65, 36, 2);
+        const coreGlow = new THREE.PointLight(0xff5a2a, 45, 50, 1.5);
         coreGlow.position.set(0, 1.2, 0);
         group.add(coreGlow);
+        caveFlicker.push({ light: coreGlow, base: 45, phase: 3, speed: 1.1, next: 0, kick: 0 });
+        this.caveFlicker = caveFlicker;
+        this.caveTunnelGlowMat = tunnelGlowMat;
 
         group.visible = false;
         this.scene.add(group);
@@ -1735,10 +2046,11 @@ class LevelManager {
         if (!this.scene || !this.scene.fog) return;
         if (this.defaultFogColor === undefined) this.defaultFogColor = this.scene.fog.color.getHex();
         this.scene.userData.caveAtmosphere = isOn;
+        EventBus.emit('CAVE_ATMOSPHERE', !!isOn);
         if (isOn) {
-            this.scene.fog.color.setHex(0x1a0805);
-            this.scene.fog.density = 0.022;
-            if (this.scene.background && this.scene.background.isColor) this.scene.background.setHex(0x1a0805);
+            this.scene.fog.color.setHex(0x331510);
+            this.scene.fog.density = 0.013;
+            if (this.scene.background && this.scene.background.isColor) this.scene.background.setHex(0x331510);
         } else {
             this.scene.fog.color.setHex(this.defaultFogColor);
             if (this.scene.background && this.scene.background.isColor) this.scene.background.setHex(this.defaultFogColor);
@@ -1846,6 +2158,19 @@ class LevelManager {
     }
 
     getGatePouringPositions() {
+        if (this.caveShellHidden && this.caveTunnels) {
+            return this.caveTunnels.map(t => ({
+                sillX: t.mouth.x + this.caveWorldOffset,
+                sillZ: t.mouth.z,
+                outX: -t.outX,
+                outZ: -t.outZ,
+                isXAxis: t.isXAxis,
+                progress: 1,
+                targetProgress: 1,
+                width: 4.0,
+                red: true
+            }));
+        }
         const list = [];
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
@@ -2129,6 +2454,9 @@ class LevelManager {
         }
         this.enforceCaveShell();
         this.syncResearchRoomVisibility();
+
+        this.updateCabinShaftFx(delta);
+        this.updateCaveEffects(delta);
 
         // 1. Környezeti textúra léptetés: A lift LEFELÉ halad, ezért a fal textúrája FELFELE halad
         // Szigorú matematikai szinkronizáció a felfelé suhanó aknalámpákkal!

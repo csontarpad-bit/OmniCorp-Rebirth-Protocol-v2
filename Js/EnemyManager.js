@@ -376,15 +376,25 @@ export class EnemyManager {
             ? this.navigation.levelManager.caveWorldOffset
             : 0;
         if (arenaOffsetX !== 0) {
-            if (type === 'boss') {
-                const caveBossSpawns = [
-                    { x: -10, z: 0 },
-                    { x: 10, z: -8 },
-                    { x: 0, z: 10 }
-                ];
-                const spawn = caveBossSpawns[this.bossSpawnCursor % caveBossSpawns.length];
-                this.bossSpawnCursor++;
-                return { x: arenaOffsetX + spawn.x, z: spawn.z, dirX: 0, dirZ: 0 };
+            // A barlangban az ellenfelek a falban lévő járatokból lépnek elő
+            const tunnels = this.navigation.levelManager.caveTunnels;
+            if (tunnels && tunnels.length > 0) {
+                let tunnel;
+                if (type === 'boss') {
+                    tunnel = tunnels[(this.bossSpawnCursor * 5) % tunnels.length];
+                    this.bossSpawnCursor++;
+                } else {
+                    tunnel = tunnels[Math.floor(Math.random() * tunnels.length)];
+                }
+                const lateral = tunnel.lateral + (type === 'boss' ? 0 : (Math.random() - 0.5) * 2.0);
+                const depth = 30.5 + (type === 'boss' ? 0 : Math.random() * 2.5);
+                const wallSign = tunnel.isXAxis ? tunnel.outZ : tunnel.outX;
+                return {
+                    x: arenaOffsetX + (tunnel.isXAxis ? lateral : wallSign * depth),
+                    z: tunnel.isXAxis ? wallSign * depth : lateral,
+                    dirX: -tunnel.outX,
+                    dirZ: -tunnel.outZ
+                };
             }
             return {
                 x: arenaOffsetX + (Math.random() - 0.5) * 34,

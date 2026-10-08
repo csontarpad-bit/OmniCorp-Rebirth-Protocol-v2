@@ -1207,7 +1207,9 @@ class UIManager {
                 if (data.type === 'research') {
                     text = `${data.label || 'R&D ÁLLOMÁS'} — [E] HASZNÁLAT`;
                 } else if (data.type === 'terminal') {
-                    text = data.researchFloor
+                    text = data.maglift
+                        ? 'MAGLIFT — [E] BESZÁLLÁS A BARLANGBA'
+                        : data.researchFloor
                         ? `R&D MENEDÉK — ${data.researchFloor}. EMELET [E]`
                         : 'KÖZÉPSŐ TERMINÁL — [E] HASZNÁLAT';
                 }

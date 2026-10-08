@@ -69,9 +69,7 @@ class VFXManager {
         EventBus.on('HEALING_STEAM', (intensity) => {
             this.healingSteamIntensity = THREE.MathUtils.clamp(intensity, 0, 1);
         });
-        EventBus.on('STERILIZE_AIR', () => {
-            if (this.radSystem) this.radSystem.visible = false;
-        });
+        EventBus.on('CAVE_ATMOSPHERE', (isCave) => this.setDustTheme(isCave));
         EventBus.on('WAVE_STARTED', () => {
             if (this.radSystem) this.radSystem.visible = true;
         });
@@ -465,7 +463,8 @@ class VFXManager {
 
     createRadSystem() {
         // Radioaktív por (400 részecske, pontosan mint a régi kód 246. sorában)
-        const particleCount = 400;
+        const particleCount = 500;
+        this.radVelocities = new Float32Array(particleCount * 3);
         const geo = new THREE.BufferGeometry();
         const positions = new Float32Array(particleCount * 3);
         
@@ -473,6 +472,9 @@ class VFXManager {
             positions[i * 3] = (Math.random() - 0.5) * 50;
             positions[i * 3 + 1] = Math.random() * 10;
             positions[i * 3 + 2] = (Math.random() - 0.5) * 50;
+            this.radVelocities[i * 3] = (Math.random() - 0.5) * 1.2;
+            this.radVelocities[i * 3 + 1] = (Math.random() - 0.5) * 0.8;
+            this.radVelocities[i * 3 + 2] = (Math.random() - 0.5) * 1.2;
         }
         geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         
@@ -487,6 +489,18 @@ class VFXManager {
         pContext.fillRect(0, 0, 32, 32);
         const particleTexture = new THREE.CanvasTexture(particleCanvas);
         particleTexture.needsUpdate = true;
+        this.greenDustTexture = particleTexture;
+
+        const redDustCanvas = document.createElement('canvas');
+        redDustCanvas.width = 32; redDustCanvas.height = 32;
+        const rdContext = redDustCanvas.getContext('2d');
+        const rdGradient = rdContext.createRadialGradient(16, 16, 0, 16, 16, 16);
+        rdGradient.addColorStop(0, 'rgba(255, 190, 170, 1)');
+        rdGradient.addColorStop(0.4, 'rgba(255, 30, 20, 0.7)');
+        rdGradient.addColorStop(1, 'rgba(80, 0, 0, 0)');
+        rdContext.fillStyle = rdGradient;
+        rdContext.fillRect(0, 0, 32, 32);
+        this.redDustTexture = new THREE.CanvasTexture(redDustCanvas);
 
         const mat = new THREE.PointsMaterial({
             color: 0x55ff55,
@@ -499,7 +513,21 @@ class VFXManager {
         
         this.radSystem = new THREE.Points(geo, mat);
         this.radSystem.renderOrder = 999;
+        // A részecskék a kamera körül mozognak, ezért a kezdeti befoglaló gömb alapján nem szabad kivágni őket
+        this.radSystem.frustumCulled = false;
         if (this.scene) this.scene.add(this.radSystem);
+        this.setDustTheme(this.dustIsCave);
+    }
+
+    // Csak a barlangban piros és szeszélyesebb a por, máshol a megszokott zöld
+    setDustTheme(isCave) {
+        this.dustIsCave = !!isCave;
+        if (!this.radSystem) return;
+        const mat = this.radSystem.material;
+        mat.map = isCave ? this.redDustTexture : this.greenDustTexture;
+        mat.color.setHex(isCave ? 0xff3a2a : 0x55ff55);
+        mat.size = isCave ? 0.38 : 0.3;
+        mat.needsUpdate = true;
     }
 
     createFogSystem() {
@@ -537,6 +565,17 @@ class VFXManager {
         fCtx.fillRect(0, 0, 128, 128);
         this.fogTexture = new THREE.CanvasTexture(fogCanvas);
         this.fogTexture.needsUpdate = true;
+
+        const redCanvas = document.createElement('canvas');
+        redCanvas.width = 128; redCanvas.height = 128;
+        const rCtx = redCanvas.getContext('2d');
+        const rGrad = rCtx.createRadialGradient(64, 64, 10, 64, 64, 60);
+        rGrad.addColorStop(0, 'rgba(255, 50, 30, 0.45)');
+        rGrad.addColorStop(0.5, 'rgba(190, 25, 15, 0.12)');
+        rGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        rCtx.fillStyle = rGrad;
+        rCtx.fillRect(0, 0, 128, 128);
+        this.redSmokeTexture = new THREE.CanvasTexture(redCanvas);
 
         const mat = new THREE.PointsMaterial({
             size: 15.0,
@@ -854,7 +893,9 @@ class VFXManager {
 
     _createGateSmokePuff(gate, isBurst, sterilizationIntensity = 0) {
         const isSterilizationSteam = sterilizationIntensity > 0;
-        const texture = isSterilizationSteam ? this.sterilizationFogTexture : this.fogTexture;
+        const isRed = !!gate.red && !isSterilizationSteam && !!this.redSmokeTexture;
+        const smokeColor = isRed ? 0xff3a22 : 0x22ff55;
+        const texture = isSterilizationSteam ? this.sterilizationFogTexture : (isRed ? this.redSmokeTexture : this.fogTexture);
         if (!this.scene || !texture) return;
         if (this.corridorSmokePuffs.length >= 200) return;
 
@@ -864,7 +905,7 @@ class VFXManager {
 
             const puffMat = new THREE.SpriteMaterial({
                 map: texture,
-                color: isSterilizationSteam ? 0xffffff : 0x22ff55,
+                color: isSterilizationSteam ? 0xffffff : smokeColor,
                 transparent: true,
                 opacity: 0.85,
                 blending: THREE.AdditiveBlending,
@@ -884,12 +925,12 @@ class VFXManager {
         }
         const puff = puffData.mesh;
         puff.material.map = texture;
-        puff.material.color.setHex(isSterilizationSteam ? 0xffffff : 0x22ff55);
+        puff.material.color.setHex(isSterilizationSteam ? 0xffffff : smokeColor);
         puffData.opacityMultiplier = 1;
         puff.material.needsUpdate = true;
 
         // Szétterülés a kapunyílás szélességében (5.0m mentén szórva)
-        const lateralOffset = (Math.random() - 0.5) * 5.0;
+        const lateralOffset = (Math.random() - 0.5) * (gate.width || 5.0);
         let posX = gate.sillX;
         let posZ = gate.sillZ;
         if (gate.isXAxis) {
@@ -949,25 +990,47 @@ class VFXManager {
 
         // 1. Radioaktív por (radSystem) lebegése, hullámzása és örvénylése (pontosan mint a régi kód 5009. sorában)
         if (this.radSystem) {
-            this.radSystem.rotation.y += delta * 0.05; // A por lassan örvénylik
             const positions = this.radSystem.geometry.attributes.position.array;
+            const velocities = this.radVelocities;
             this.elapsedTime = (this.elapsedTime || 0) + delta;
-            const time = this.elapsedTime;
             const limit = 25.0;
 
-            for (let i = 0; i < positions.length; i += 3) {
-                positions[i + 1] += delta * 0.3; // Lassú emelkedés (Y tengely)
-                positions[i] += Math.sin(time * 1.5 + positions[i + 1]) * delta * 0.5; // Hullámzás (X)
-                positions[i + 2] += Math.cos(time * 1.5 + positions[i + 1]) * delta * 0.5; // Hullámzás (Z)
+            if (!this.dustIsCave) {
+                this.radSystem.rotation.y += delta * 0.05;
+                const time = this.elapsedTime;
+                for (let i = 0; i < positions.length; i += 3) {
+                    positions[i + 1] += delta * 0.3;
+                    positions[i] += Math.sin(time * 1.5 + positions[i + 1]) * delta * 0.5;
+                    positions[i + 2] += Math.cos(time * 1.5 + positions[i + 1]) * delta * 0.5;
+                    if (positions[i + 1] > 10.0) positions[i + 1] = 0.2;
+                    if (positions[i] > camX + limit) positions[i] -= limit * 2;
+                    if (positions[i] < camX - limit) positions[i] += limit * 2;
+                    if (positions[i + 2] > camZ + limit) positions[i + 2] -= limit * 2;
+                    if (positions[i + 2] < camZ - limit) positions[i + 2] += limit * 2;
+                }
+            } else {
+                this.radSystem.rotation.y = 0;
+                for (let i = 0; i < positions.length; i += 3) {
+                    // Összevissza szálló por: minden szemcse irányát véletlenszerűen terelgetjük
+                    velocities[i] += (Math.random() - 0.5) * delta * 6;
+                    velocities[i + 1] += (Math.random() - 0.5) * delta * 4;
+                    velocities[i + 2] += (Math.random() - 0.5) * delta * 6;
+                    velocities[i] = THREE.MathUtils.clamp(velocities[i], -1.4, 1.4);
+                    velocities[i + 1] = THREE.MathUtils.clamp(velocities[i + 1], -0.9, 0.9);
+                    velocities[i + 2] = THREE.MathUtils.clamp(velocities[i + 2], -1.4, 1.4);
+                    positions[i] += velocities[i] * delta;
+                    positions[i + 1] += velocities[i + 1] * delta;
+                    positions[i + 2] += velocities[i + 2] * delta;
 
-                // Ha túl magasra szállt, kezdje újra lentről
-                if (positions[i + 1] > 10.0) positions[i + 1] = 0.2;
+                    if (positions[i + 1] > 9.0) { positions[i + 1] = 9.0; velocities[i + 1] = -Math.abs(velocities[i + 1]); }
+                    if (positions[i + 1] < 0.2) { positions[i + 1] = 0.2; velocities[i + 1] = Math.abs(velocities[i + 1]); }
 
-                // Kamera-követő végtelenítő doboz
-                if (positions[i] > camX + limit) positions[i] -= limit * 2;
-                if (positions[i] < camX - limit) positions[i] += limit * 2;
-                if (positions[i + 2] > camZ + limit) positions[i + 2] -= limit * 2;
-                if (positions[i + 2] < camZ - limit) positions[i + 2] += limit * 2;
+                    // Kamera-követő végtelenítő doboz
+                    if (positions[i] > camX + limit) positions[i] -= limit * 2;
+                    if (positions[i] < camX - limit) positions[i] += limit * 2;
+                    if (positions[i + 2] > camZ + limit) positions[i + 2] -= limit * 2;
+                    if (positions[i + 2] < camZ - limit) positions[i + 2] += limit * 2;
+                }
             }
             this.radSystem.geometry.attributes.position.needsUpdate = true;
         }
@@ -1181,9 +1244,6 @@ class VFXManager {
     }
 
     updateMenu(delta) {
-        if (this.radSystem) {
-            this.radSystem.rotation.y += delta * 0.05;
-        }
     }
 
     reset() {
