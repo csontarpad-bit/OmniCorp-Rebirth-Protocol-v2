@@ -48,6 +48,7 @@ function bootstrapGame() {
         console.log('[KRONOS] LOADING_COMPLETE esemény fogadva. Játék modulok inicializálása...');
 
         // Szint és Navigáció
+        LevelManager.renderer = Engine.renderer;
         LevelManager.init(Engine.scene, AssetManager);
         navigation.init(LevelManager);
 
@@ -68,6 +69,7 @@ function bootstrapGame() {
         // A korábbi, minden modell klónozásával végzett előmelegítés a kezdeti betöltést blokkolta.
         // A minimális, nem blokkoló előmelegítés elkerüli a startup befagyást.
         setTimeout(() => preWarmShaders(Engine), 50);
+        setTimeout(() => LevelManager.prewarmLightStates(Engine.renderer, Engine.camera), 300);
         AssetManager.loadOptional();
 
         console.log('[KRONOS] Rendszerek sikeresen integrálva.');

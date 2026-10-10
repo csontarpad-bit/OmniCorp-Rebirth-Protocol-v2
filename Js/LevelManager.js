@@ -1239,28 +1239,14 @@ class LevelManager {
         const terminalRoot = new THREE.Group();
         terminalRoot.position.set(-S.terminalDistance, 0, S.terminalZ);
         terminalRoot.rotation.y = Math.PI / 2;
-        terminalRoot.visible = false;
+        terminalRoot.visible = true;
         group.add(terminalRoot);
         this.nodeTerminalGroup = terminalRoot;
         const terminalAdd = (geometry, material, x, y, z, blocks = false) => place(terminalRoot, geometry, material, x, y, z, blocks);
         this.addResearchConsole(terminalRoot, terminalAdd, assetManager, nodeUnlockStation, new THREE.Color(nodeUnlockStation.color), 0);
         place(terminalRoot, this.createLabelGeometry(4.2, 1.05), this.createLabelMaterial(nodeUnlockStation.label, nodeUnlockStation.color), 0, 4.2, -1.27);
 
-        // Feliratok
-        const signs = [
-            { label: 'SZERVERTEREM // NODE', color: 0xff3048, d: S.gateDistance - t / 2 - 0.02, y: 5.6, w: 4.4, h: 0.55, face: Math.PI / 2 },
-            { label: 'KIJÁRAT // ÚJ SZEKTOR', color: 0x00d9ff, d: S.roomEndDistance - t / 2 - 0.02, y: 5.6, w: 4.4, h: 0.55, face: Math.PI / 2 },
-            { label: 'KÖVETKEZŐ SZEKTOR // PÁLYALIFT', color: 0x00ff99, d: S.liftEndDistance - 3, y: 4.2, w: 4.4, h: 1.1, face: Math.PI / 2 }
-        ];
         this.nodeSigns = [];
-        for (const sign of signs) {
-            const mesh = place(group, this.createLabelGeometry(sign.w, sign.h), this.createLabelMaterial(sign.label, sign.color), -sign.d, sign.y, 0);
-            mesh.rotation.y = sign.face;
-            this.nodeSigns.push({ mesh, normal: mesh.material });
-        }
-        this.nodeSigns[0].final = this.createLabelMaterial('SZERVERTEREM // GALLAGHER', 0x66aaff);
-        this.nodeSigns[1].final = this.createLabelMaterial('KIJÁRAT // MAGLIFT', 0x00d9ff);
-        this.nodeSigns[2].final = this.createLabelMaterial('MAG // EGYSZEMÉLYES LIFT', 0xff3048);
 
         const lightSpots = [
             { d: 36, color: 0xf2fbff }, { d: 54, color: 0xdff4ff }, { d: 66, color: 0xffd0d6 },
@@ -1385,7 +1371,7 @@ class LevelManager {
         const room = new THREE.Group();
         room.visible = false;
         room.position.set(offsetX, 0, 0);
-        const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a4f56, metalness: 0.4, roughness: 0.6, emissive: 0x14100d, emissiveIntensity: 0.6 });
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xe0cfc2, roughness: 0.94, metalness: 0.02 });
         const rockTexture = this.createCaveTexture('#7d5a49', 'rgba(210,95,50,0.34)', 9817);
         const floorTexture = this.createCaveTexture('#775847', 'rgba(190,120,85,0.22)', 12661);
         const rockMat = new THREE.MeshStandardMaterial({ color: 0xe0cfc2, map: rockTexture, roughness: 0.94, metalness: 0.02, flatShading: true });
@@ -1393,7 +1379,7 @@ class LevelManager {
         const floorTexMat = new THREE.MeshStandardMaterial({ color: 0xcdb8a8, map: floorTexture, roughness: 0.96, metalness: 0.02 });
         const frameMat = new THREE.MeshStandardMaterial({ color: 0x222c32, metalness: 0.5, roughness: 0.6 });
         const panelMat = new THREE.MeshStandardMaterial({ color: 0x4a5258, metalness: 0.3, roughness: 0.7, side: THREE.DoubleSide });
-        const rampMat = new THREE.MeshStandardMaterial({ color: 0x2a3238, metalness: 0.5, roughness: 0.55, emissive: 0x3a0a10, emissiveIntensity: 0.5 });
+        const rampMat = new THREE.MeshStandardMaterial({ color: 0x2a3238, metalness: 0.5, roughness: 0.55 });
         const crystalMats = [
             new THREE.MeshStandardMaterial({ color: 0x2c9c88, emissive: 0x12b89c, emissiveIntensity: 1.2, roughness: 0.22, metalness: 0.1 }),
             new THREE.MeshStandardMaterial({ color: 0xe75f2b, emissive: 0xe0471a, emissiveIntensity: 1.2, roughness: 0.28, metalness: 0.05 })
@@ -1441,7 +1427,7 @@ class LevelManager {
             new THREE.Vector3(x0, 0, z0).add(shift), new THREE.Vector3(x1, 6, z1).add(shift)
         ));
 
-        const xMin = -5.5, xMax = 12.5, halfZ = 5, h = 6, t = 0.5;
+        const xMin = -5.5, xMax = 26.8, halfZ = 5, h = 6, t = 0.5;
         const pitHalf = 3, pitDepth = 13, cabinHalf = 1.3;
         const cx = (xMin + xMax) / 2, len = xMax - xMin;
 
@@ -1458,14 +1444,6 @@ class LevelManager {
         const side = halfZ - gap;
         part(t, h, side, wallMat, xMax + t / 2, h / 2, gap + side / 2);
         part(t, h, side, wallMat, xMax + t / 2, h / 2, -gap - side / 2);
-        // A kisebb szoba és a folyosó vége közötti összekötő járat
-        const hallEnd = 25;
-        const tunnelLen = hallEnd - xMax, tunnelCx = (xMax + hallEnd) / 2;
-        part(tunnelLen, 0.2, gap * 2, floorTexMat, tunnelCx, -0.1, 0, false);
-        part(tunnelLen, 0.3, gap * 2, wallMat, tunnelCx, h + 0.15, 0, false);
-        part(tunnelLen, h, t, wallMat, tunnelCx, h / 2, gap + t / 2);
-        part(tunnelLen, h, t, wallMat, tunnelCx, h / 2, -gap - t / 2);
-
         // A járat peremei és a kabin zárt: csak a rámpa vezet a kabinhoz
         block(-pitHalf, pitHalf, -pitHalf, -cabinHalf);
         block(-pitHalf, pitHalf, cabinHalf, pitHalf);
@@ -1477,7 +1455,7 @@ class LevelManager {
             for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * factor, uv.getY(i) * factor);
             return geometry;
         };
-        for (const [px, pz, size] of [[6, -3.4, 2.2], [9.5, 2.6, 2.4], [-3.6, 3.6, 1.8], [-3.6, -3.6, 1.6], [4.8, 3.6, 1.7], [11, -2, 1.8]]) {
+        for (const [px, pz, size] of [[6, -3.4, 2.2], [9.5, 2.6, 2.4], [-3.6, 3.6, 1.8], [-3.6, -3.6, 1.6], [4.8, 3.6, 1.7], [11, -2, 1.8], [15.5, -3, 2.3], [19, 2.8, 2.1], [22.5, -1.5, 1.9], [14, 3.4, 1.6]]) {
             const patch = new THREE.Mesh(scaleUv(new THREE.PlaneGeometry(size * 2, size * 2), size / 4), patchMat);
             patch.rotation.x = -Math.PI / 2;
             patch.rotation.z = Math.random() * Math.PI;
@@ -1486,32 +1464,35 @@ class LevelManager {
         }
 
         // Kőzetréteg a falak belső oldalán, mint a barlangban
-        const rockGeo = new THREE.IcosahedronGeometry(1, 1);
-        const rp = rockGeo.attributes.position;
-        for (let i = 0; i < rp.count; i++) {
-            const variation = 0.82 + Math.random() * 0.38;
-            rp.setXYZ(i, rp.getX(i) * variation, rp.getY(i) * variation, rp.getZ(i) * variation);
-        }
-        rockGeo.computeVertexNormals();
-        let rockIndex = 0;
-        const addRock = (px, py, pz, yaw, tangent) => {
-            const rock = new THREE.Mesh(rockGeo, rockIndex++ % 3 ? rockMat : deepRockMat);
+        const rockGeos = [0, 1, 2].map(() => {
+            const g = new THREE.IcosahedronGeometry(1, 1);
+            const rp = g.attributes.position;
+            for (let i = 0; i < rp.count; i++) {
+                const k = 0.6 + Math.random() * 0.8;
+                rp.setXYZ(i, rp.getX(i) * k, rp.getY(i) * (0.6 + Math.random() * 0.8), rp.getZ(i) * k);
+            }
+            g.computeVertexNormals();
+            return g;
+        });
+        const rnd = (a, b) => a + Math.random() * (b - a);
+        const addRock = (px, py, pz, yaw, size) => {
+            const rock = new THREE.Mesh(rockGeos[Math.floor(Math.random() * 3)], Math.random() < 0.4 ? deepRockMat : rockMat);
             rock.position.set(px, py, pz);
-            rock.rotation.y = yaw + (Math.random() - 0.5) * 0.3;
-            rock.scale.set(tangent * (0.8 + Math.random() * 0.4), 1.7 + Math.random() * 1.3, 0.85 + Math.random() * 0.25);
+            rock.rotation.set(rnd(-0.5, 0.5), yaw + rnd(-0.8, 0.8), rnd(-0.5, 0.5));
+            rock.scale.set(size * rnd(0.6, 1.5), size * rnd(0.7, 1.9), size * rnd(0.5, 1.1));
             room.add(rock);
         };
-        const rows = [1.5, 4.3];
-        for (const y of rows) {
-            for (let x = xMin + 1; x <= xMax - 1; x += 2.3) {
-                addRock(x, y, -halfZ - 0.4, 0, 1.4);
-                addRock(x, y, halfZ + 0.4, 0, 1.4);
+        // Szabálytalan kőzetréteg: véletlen méret, magasság, mélység és dőlés
+        const scatter = (from, to, place) => {
+            for (let u = from + rnd(0, 0.8); u < to; u += rnd(0.5, 1.7)) {
+                const n = 1 + Math.floor(Math.random() * 3);
+                for (let j = 0; j < n; j++) place(u + rnd(-0.4, 0.4), rnd(0.3, h - 0.3), rnd(0.15, 0.7), rnd(0.55, 1.35));
             }
-            for (let z = -halfZ + 1; z <= halfZ - 1; z += 2.3) {
-                addRock(xMin - 0.4, y, z, Math.PI / 2, 1.4);
-                if (Math.abs(z) > gap + 1) addRock(xMax + 0.4, y, z, Math.PI / 2, 1.4);
-            }
-        }
+        };
+        scatter(xMin + 0.3, xMax - 0.3, (u, y, d, sz) => addRock(u, y, -halfZ - d + 0.3, 0, sz));
+        scatter(xMin + 0.3, xMax - 0.3, (u, y, d, sz) => addRock(u, y, halfZ + d - 0.3, 0, sz));
+        scatter(-halfZ + 0.3, halfZ - 0.3, (u, y, d, sz) => addRock(xMin - d + 0.3, y, u, Math.PI / 2, sz));
+        scatter(-halfZ + 0.3, halfZ - 0.3, (u, y, d, sz) => { if (Math.abs(u) > gap + 0.8) addRock(xMax + d - 0.3, y, u, Math.PI / 2, sz); });
 
         // A mély járat falai és alja
         const pitWallGeo = scaleUv(new THREE.PlaneGeometry(pitHalf * 2, pitDepth), 1.5);
@@ -1529,7 +1510,9 @@ class LevelManager {
         // Rámpa a kabinhoz: enyhén emelkedik a padlótól a kabin küszöbéig
         const rampLen = pitHalf - cabinHalf;
         const rampRise = 0.1;
-        const ramp = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(rampLen, rampRise), 0.12, cabinHalf * 2), rampMat);
+        const rampGeo = new THREE.BoxGeometry(Math.hypot(rampLen, rampRise), 0.12, cabinHalf * 2);
+        tileUvs(rampGeo, Math.hypot(rampLen, rampRise) * 2, 0.24, cabinHalf * 4);
+        const ramp = new THREE.Mesh(rampGeo, rampMat);
         ramp.position.set(cabinHalf + rampLen / 2, rampRise / 2 - 0.06, 0);
         ramp.rotation.z = -Math.atan2(rampRise, rampLen);
         room.add(ramp);
@@ -1582,9 +1565,10 @@ class LevelManager {
             room.add(crystal);
         });
 
-        room.add(new THREE.AmbientLight(0xd8987c, 3.2));
-        const light = new THREE.PointLight(0xffd9a8, 0, 22, 1.4);
-        light.position.set(offsetX + 6, 5, 0);
+        // Csak ebben a szobában világít (a 101. szinten); a fényszám állandó marad, így nincs shader-újrafordítás
+        const light = new THREE.PointLight(0xe8a888, 0, 24, 0.7);
+        light.position.set(offsetX + 8, 4.8, 0);
+        light.userData.podOnlyIntensity = 7;
         this.scene.add(light);
         this.nodeLights.push(light);
         const crystalLight = new THREE.PointLight(0x2fd8bb, 0, 16, 1.5);
@@ -1599,7 +1583,7 @@ class LevelManager {
         // A valódi barlangtextúrák betöltődésekor kicserélik a generáltakat
         this.loadCaveTexture('podWall', (tex) => {
             wallMat.map = tex;
-            wallMat.color.setHex(0xb0b0b0);
+            wallMat.color.setHex(0xffffff);
             wallMat.needsUpdate = true;
         });
         this.loadCaveTexture('wall', (tex) => {
@@ -1611,6 +1595,9 @@ class LevelManager {
         this.loadCaveTexture('floorCracked', (tex) => { patchMat.map = tex; patchMat.color.setHex(0xe6dcd5); patchMat.needsUpdate = true; });
         this.loadCaveTexture('liftWall', (tex) => {
             for (const m of [frameMat, panelMat]) { m.map = tex; m.color.setHex(0x9a9a9a); m.needsUpdate = true; }
+            rampMat.map = tex;
+            rampMat.color.setHex(0x8c8c8c);
+            rampMat.needsUpdate = true;
         });
         this.loadCaveTexture('crystal', (tex) => {
             for (const m of crystalMats) { m.map = tex; m.emissiveMap = tex; m.color.setHex(0xffffff); m.needsUpdate = true; }
@@ -1643,7 +1630,7 @@ class LevelManager {
             door.mesh.position.y = door.closedY;
             door.mesh.visible = true;
         }
-        if (this.nodeTerminalGroup) this.nodeTerminalGroup.visible = false;
+        if (this.nodeTerminalGroup) this.nodeTerminalGroup.visible = true;
         this.setSectorPodActive(false);
         this.applyReplacedDoors();
     }
@@ -1699,6 +1686,45 @@ class LevelManager {
         this.syncResearchRoomVisibility();
     }
 
+    // A látható fények száma a pályarészek (kapuk, szerverterem, barlang, kabin) váltásakor megváltozik, ilyenkor a three.js
+    // újrafordítja az összes anyag shaderét: ez okozta az akadozást. Betöltéskor minden változatot egyszer lefordítunk.
+    prewarmLightStates(renderer, camera) {
+        if (!renderer || !camera || !this.scene) return;
+        const savedOffset = this.caveWorldOffset;
+        try {
+            if (!this.caveGroup) {
+                this.caveWorldOffset = -sectorHallCenter;
+                this.buildCave();
+                this.caveWorldOffset = savedOffset;
+                this.caveGroup.position.x = savedOffset;
+            }
+            if (!this.cabinGroup) {
+                this.showSingleCabin(0, 0);
+                this.hideSingleCabin();
+            }
+            const targets = [this.gatesGroup, this.serverRoomGroup, this.caveGroup, this.nodeSectionGroup, this.cabinGroup, this.sectorRegenerationPod]
+                .filter(Boolean);
+            // Az r128 compile() a rejtett objektumokat is bejárja, ezért valódi, apró célpufferbe renderelünk
+            const target = new THREE.WebGLRenderTarget(16, 16);
+            target.texture.encoding = renderer.outputEncoding;
+            const culled = [];
+            this.scene.traverse((o) => { if (o.isMesh && o.frustumCulled) { culled.push(o); o.frustumCulled = false; } });
+            const saved = targets.map(t => t.visible);
+            const prevTarget = renderer.getRenderTarget();
+            renderer.setRenderTarget(target);
+            for (let mask = 0; mask < (1 << targets.length); mask++) {
+                targets.forEach((t, i) => { t.visible = !!(mask & (1 << i)); });
+                renderer.render(this.scene, camera);
+            }
+            renderer.setRenderTarget(prevTarget);
+            targets.forEach((t, i) => { t.visible = saved[i]; });
+            for (const o of culled) o.frustumCulled = true;
+            target.dispose();
+        } catch (err) {
+            console.warn('[KRONOS] Fényváltozat előmelegítés figyelmeztetés:', err);
+        }
+    }
+
     syncResearchRoomVisibility() {
         const gatesVisible = !!this.gatesGroup && this.gatesGroup.visible;
         const hubVisible = this.researchRoomsActive && gatesVisible;
@@ -1708,7 +1734,10 @@ class LevelManager {
         this.isResearchHubVisible = hubVisible;
         this.isNodeSectionVisible = nodeVisible;
         for (const light of this.researchRoomLights) light.intensity = hubVisible ? 2.4 : 0;
-        for (const light of this.nodeLights) light.intensity = nodeVisible ? 2.4 : 0;
+        for (const light of this.nodeLights) {
+            const podOnly = light.userData.podOnlyIntensity;
+            light.intensity = !nodeVisible ? 0 : podOnly !== undefined ? (this.finalPodRoomActive ? podOnly : 0) : 2.4;
+        }
     }
 
     showSingleCabin(x, z) {
@@ -1877,6 +1906,7 @@ class LevelManager {
                 tex.encoding = THREE.sRGBEncoding;
                 tex.anisotropy = 4;
                 entry.tex = tex;
+                if (this.renderer) this.renderer.initTexture(tex);
                 for (const fn of entry.waiting) fn(tex);
                 entry.waiting.length = 0;
             }, undefined, () => { entry.waiting.length = 0; });
