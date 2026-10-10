@@ -1380,25 +1380,76 @@ class LevelManager {
         }
     }
 
-    // A 101. szint szerverterme után nem aréna, hanem egy kis szoba áll az egyszemélyes liftel
+    // A 101. szint szerverterme után nem aréna, hanem egy kis barlangszerű szoba áll az egyszemélyes liftel
     createFinalPodRoom(offsetX, floorMat, shift) {
         const room = new THREE.Group();
         room.visible = false;
         room.position.set(offsetX, 0, 0);
         const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a4f56, metalness: 0.4, roughness: 0.6, emissive: 0x14100d, emissiveIntensity: 0.6 });
-        const xMin = -8, xMax = 25, halfZ = 9, h = 6, t = 0.5;
+        const rockTexture = this.createCaveTexture('#7d5a49', 'rgba(210,95,50,0.34)', 9817);
+        const floorTexture = this.createCaveTexture('#775847', 'rgba(190,120,85,0.22)', 12661);
+        const rockMat = new THREE.MeshStandardMaterial({ color: 0xe0cfc2, map: rockTexture, roughness: 0.94, metalness: 0.02, flatShading: true });
+        const deepRockMat = new THREE.MeshStandardMaterial({ color: 0xb49f90, map: rockTexture, roughness: 0.97, metalness: 0, flatShading: true, side: THREE.DoubleSide });
+        const floorTexMat = new THREE.MeshStandardMaterial({ color: 0xcdb8a8, map: floorTexture, roughness: 0.96, metalness: 0.02 });
+        const frameMat = new THREE.MeshStandardMaterial({ color: 0x222c32, metalness: 0.5, roughness: 0.6 });
+        const panelMat = new THREE.MeshStandardMaterial({ color: 0x4a5258, metalness: 0.3, roughness: 0.7, side: THREE.DoubleSide });
+        const rampMat = new THREE.MeshStandardMaterial({ color: 0x2a3238, metalness: 0.5, roughness: 0.55, emissive: 0x3a0a10, emissiveIntensity: 0.5 });
+        const crystalMats = [
+            new THREE.MeshStandardMaterial({ color: 0x2c9c88, emissive: 0x12b89c, emissiveIntensity: 1.2, roughness: 0.22, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({ color: 0xe75f2b, emissive: 0xe0471a, emissiveIntensity: 1.2, roughness: 0.28, metalness: 0.05 })
+        ];
+        const patchCanvas = document.createElement('canvas');
+        patchCanvas.width = patchCanvas.height = 128;
+        const patchCtx = patchCanvas.getContext('2d');
+        const patchGradient = patchCtx.createRadialGradient(64, 64, 8, 64, 64, 62);
+        patchGradient.addColorStop(0, '#fff');
+        patchGradient.addColorStop(0.55, '#bbb');
+        patchGradient.addColorStop(1, '#000');
+        patchCtx.fillStyle = patchGradient;
+        patchCtx.fillRect(0, 0, 128, 128);
+        const patchMat = new THREE.MeshStandardMaterial({
+            color: 0xcdb8a8, map: floorTexture, alphaMap: new THREE.CanvasTexture(patchCanvas), transparent: true, depthWrite: false,
+            roughness: 0.9, metalness: 0.02, polygonOffset: true, polygonOffsetFactor: -2
+        });
+
         const boxes = [];
+        const tileSize = 4;
+        // A textúra méterarányosan ismétlődik a doboz minden lapján
+        const tileUvs = (geo, w, hh, d) => {
+            const uv = geo.attributes.uv;
+            const faces = [[d, hh], [d, hh], [w, d], [w, d], [w, hh], [w, hh]];
+            for (let f = 0; f < 6; f++) {
+                for (let v = 0; v < 4; v++) {
+                    const i = f * 4 + v;
+                    uv.setXY(i, uv.getX(i) * faces[f][0] / tileSize, uv.getY(i) * faces[f][1] / tileSize);
+                }
+            }
+        };
         const part = (w, hh, d, mat, x, y, z, solid = true) => {
-            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, hh, d), mat);
+            const geo = new THREE.BoxGeometry(w, hh, d);
+            if (mat === wallMat || mat === floorTexMat) tileUvs(geo, w, hh, d);
+            const mesh = new THREE.Mesh(geo, mat);
             mesh.position.set(x, y, z);
             room.add(mesh);
             if (solid) boxes.push(new THREE.Box3(
                 new THREE.Vector3(x - w / 2, 0, z - d / 2).add(shift),
                 new THREE.Vector3(x + w / 2, hh, z + d / 2).add(shift)
             ));
+            return mesh;
         };
+        const block = (x0, x1, z0, z1) => boxes.push(new THREE.Box3(
+            new THREE.Vector3(x0, 0, z0).add(shift), new THREE.Vector3(x1, 6, z1).add(shift)
+        ));
+
+        const xMin = -5.5, xMax = 12.5, halfZ = 5, h = 6, t = 0.5;
+        const pitHalf = 3, pitDepth = 13, cabinHalf = 1.3;
         const cx = (xMin + xMax) / 2, len = xMax - xMin;
-        part(len, 0.2, halfZ * 2, floorMat ? floorMat.clone() : wallMat, cx, -0.1, 0, false);
+
+        // Padló lyukkal a lift kabin alatt: a mély járat köré négy padlódarab kerül
+        part(len, 0.2, halfZ - pitHalf, floorTexMat, cx, -0.1, -(halfZ + pitHalf) / 2, false);
+        part(len, 0.2, halfZ - pitHalf, floorTexMat, cx, -0.1, (halfZ + pitHalf) / 2, false);
+        part(-pitHalf - xMin, 0.2, pitHalf * 2, floorTexMat, (xMin - pitHalf) / 2, -0.1, 0, false);
+        part(xMax - pitHalf, 0.2, pitHalf * 2, floorTexMat, (xMax + pitHalf) / 2, -0.1, 0, false);
         part(len, 0.3, halfZ * 2, wallMat, cx, h + 0.15, 0, false);
         part(len, h, t, wallMat, cx, h / 2, -halfZ - t / 2);
         part(len, h, t, wallMat, cx, h / 2, halfZ + t / 2);
@@ -1407,17 +1458,168 @@ class LevelManager {
         const side = halfZ - gap;
         part(t, h, side, wallMat, xMax + t / 2, h / 2, gap + side / 2);
         part(t, h, side, wallMat, xMax + t / 2, h / 2, -gap - side / 2);
+        // A kisebb szoba és a folyosó vége közötti összekötő járat
+        const hallEnd = 25;
+        const tunnelLen = hallEnd - xMax, tunnelCx = (xMax + hallEnd) / 2;
+        part(tunnelLen, 0.2, gap * 2, floorTexMat, tunnelCx, -0.1, 0, false);
+        part(tunnelLen, 0.3, gap * 2, wallMat, tunnelCx, h + 0.15, 0, false);
+        part(tunnelLen, h, t, wallMat, tunnelCx, h / 2, gap + t / 2);
+        part(tunnelLen, h, t, wallMat, tunnelCx, h / 2, -gap - t / 2);
+
+        // A járat peremei és a kabin zárt: csak a rámpa vezet a kabinhoz
+        block(-pitHalf, pitHalf, -pitHalf, -cabinHalf);
+        block(-pitHalf, pitHalf, cabinHalf, pitHalf);
+        block(-pitHalf, cabinHalf, -cabinHalf, cabinHalf);
+
+        // Vegyes talaj: sima padlón repedezett foltok, mint a barlangban
+        const scaleUv = (geometry, factor) => {
+            const uv = geometry.attributes.uv;
+            for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * factor, uv.getY(i) * factor);
+            return geometry;
+        };
+        for (const [px, pz, size] of [[6, -3.4, 2.2], [9.5, 2.6, 2.4], [-3.6, 3.6, 1.8], [-3.6, -3.6, 1.6], [4.8, 3.6, 1.7], [11, -2, 1.8]]) {
+            const patch = new THREE.Mesh(scaleUv(new THREE.PlaneGeometry(size * 2, size * 2), size / 4), patchMat);
+            patch.rotation.x = -Math.PI / 2;
+            patch.rotation.z = Math.random() * Math.PI;
+            patch.position.set(px, 0.006, pz);
+            room.add(patch);
+        }
+
+        // Kőzetréteg a falak belső oldalán, mint a barlangban
+        const rockGeo = new THREE.IcosahedronGeometry(1, 1);
+        const rp = rockGeo.attributes.position;
+        for (let i = 0; i < rp.count; i++) {
+            const variation = 0.82 + Math.random() * 0.38;
+            rp.setXYZ(i, rp.getX(i) * variation, rp.getY(i) * variation, rp.getZ(i) * variation);
+        }
+        rockGeo.computeVertexNormals();
+        let rockIndex = 0;
+        const addRock = (px, py, pz, yaw, tangent) => {
+            const rock = new THREE.Mesh(rockGeo, rockIndex++ % 3 ? rockMat : deepRockMat);
+            rock.position.set(px, py, pz);
+            rock.rotation.y = yaw + (Math.random() - 0.5) * 0.3;
+            rock.scale.set(tangent * (0.8 + Math.random() * 0.4), 1.7 + Math.random() * 1.3, 0.85 + Math.random() * 0.25);
+            room.add(rock);
+        };
+        const rows = [1.5, 4.3];
+        for (const y of rows) {
+            for (let x = xMin + 1; x <= xMax - 1; x += 2.3) {
+                addRock(x, y, -halfZ - 0.4, 0, 1.4);
+                addRock(x, y, halfZ + 0.4, 0, 1.4);
+            }
+            for (let z = -halfZ + 1; z <= halfZ - 1; z += 2.3) {
+                addRock(xMin - 0.4, y, z, Math.PI / 2, 1.4);
+                if (Math.abs(z) > gap + 1) addRock(xMax + 0.4, y, z, Math.PI / 2, 1.4);
+            }
+        }
+
+        // A mély járat falai és alja
+        const pitWallGeo = scaleUv(new THREE.PlaneGeometry(pitHalf * 2, pitDepth), 1.5);
+        for (const [px, pz, yaw] of [[pitHalf, 0, Math.PI / 2], [-pitHalf, 0, Math.PI / 2], [0, pitHalf, 0], [0, -pitHalf, 0]]) {
+            const wall = new THREE.Mesh(pitWallGeo, deepRockMat);
+            wall.position.set(px, -pitDepth / 2, pz);
+            wall.rotation.y = yaw;
+            room.add(wall);
+        }
+        const pitBottom = new THREE.Mesh(new THREE.PlaneGeometry(pitHalf * 2, pitHalf * 2), deepRockMat);
+        pitBottom.rotation.x = -Math.PI / 2;
+        pitBottom.position.y = -pitDepth;
+        room.add(pitBottom);
+
+        // Rámpa a kabinhoz: enyhén emelkedik a padlótól a kabin küszöbéig
+        const rampLen = pitHalf - cabinHalf;
+        const rampRise = 0.1;
+        const ramp = new THREE.Mesh(new THREE.BoxGeometry(Math.hypot(rampLen, rampRise), 0.12, cabinHalf * 2), rampMat);
+        ramp.position.set(cabinHalf + rampLen / 2, rampRise / 2 - 0.06, 0);
+        ramp.rotation.z = -Math.atan2(rampRise, rampLen);
+        room.add(ramp);
+
+        // A kabint körülvevő lift váz a mély járat aljától a mennyezetig (a kabin magasságában csak rácsozat, az ajtó felőli oldal nyitva)
+        const shaftHalf = 1.45;
+        const doorTop = 3.4;
+        const ringYs = [];
+        for (let y = -12.25; y < h - 0.5; y += 1.75) ringYs.push(y);
+        ringYs.push(h - 0.05);
+        const frameBottom = ringYs[0], frameTop = ringYs[ringYs.length - 1];
+        const shaft = new THREE.Group();
+        const shaftMesh = (geo, mat, x, y, z, parent) => {
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            parent.add(mesh);
+            return mesh;
+        };
+        for (let k = 0; k < 4; k++) {
+            const face = new THREE.Group();
+            face.rotation.y = k * Math.PI / 2;
+            const isDoorFace = k === 1;
+            shaftMesh(new THREE.BoxGeometry(0.12, frameTop - frameBottom, 0.12), frameMat, shaftHalf, (frameTop + frameBottom) / 2, shaftHalf, face);
+            for (let i = 0; i < ringYs.length; i++) {
+                if (isDoorFace && ringYs[i] > -0.01 && ringYs[i] < doorTop) continue;
+                shaftMesh(new THREE.BoxGeometry(shaftHalf * 2, 0.09, 0.09), frameMat, 0, ringYs[i], shaftHalf, face);
+            }
+            for (let i = 0; i < ringYs.length - 1; i++) {
+                const y0 = ringYs[i], y1 = ringYs[i + 1], bay = y1 - y0, y = (y0 + y1) / 2;
+                const cabinZone = y > -0.1 && y < doorTop;
+                if (isDoorFace && cabinZone) continue;
+                if (!cabinZone && (i + k) % 2 === 0) {
+                    shaftMesh(new THREE.BoxGeometry(shaftHalf * 2 - 0.12, bay - 0.1, 0.04), panelMat, 0, y, shaftHalf, face);
+                } else {
+                    const brace = shaftMesh(new THREE.BoxGeometry(Math.hypot(shaftHalf * 2, bay), 0.06, 0.06), frameMat, 0, y, shaftHalf, face);
+                    brace.rotation.z = Math.atan2(bay, shaftHalf * 2) * (i % 2 ? 1 : -1);
+                }
+            }
+            shaft.add(face);
+        }
+        room.add(shaft);
+
+        // A kabin feletti mennyezeten kristálycsoport lóg
+        const crystalCluster = [[0, 0, 2.6, 0.5], [0.55, 0.35, 1.8, 0.36], [-0.5, 0.3, 2.0, 0.38], [0.2, -0.6, 1.5, 0.32], [-0.35, -0.45, 1.3, 0.28]];
+        crystalCluster.forEach(([px, pz, height, radius], i) => {
+            const crystal = new THREE.Mesh(new THREE.ConeGeometry(radius, height, 6), crystalMats[i % 2]);
+            crystal.rotation.x = Math.PI;
+            crystal.rotation.z = (i - 2) * 0.05;
+            crystal.position.set(px, h - height / 2 + 0.05, pz);
+            room.add(crystal);
+        });
+
+        room.add(new THREE.AmbientLight(0xd8987c, 3.2));
         const light = new THREE.PointLight(0xffd9a8, 0, 22, 1.4);
-        light.position.set(offsetX + 12, 5, 0);
+        light.position.set(offsetX + 6, 5, 0);
         this.scene.add(light);
         this.nodeLights.push(light);
+        const crystalLight = new THREE.PointLight(0x2fd8bb, 0, 16, 1.5);
+        crystalLight.position.set(offsetX, 4.2, 0);
+        this.scene.add(crystalLight);
+        this.nodeLights.push(crystalLight);
+        const pitLight = new THREE.PointLight(0xff5a2a, 0, 16, 1.5);
+        pitLight.position.set(offsetX, -9, 0);
+        this.scene.add(pitLight);
+        this.nodeLights.push(pitLight);
+
+        // A valódi barlangtextúrák betöltődésekor kicserélik a generáltakat
+        this.loadCaveTexture('podWall', (tex) => {
+            wallMat.map = tex;
+            wallMat.color.setHex(0xb0b0b0);
+            wallMat.needsUpdate = true;
+        });
+        this.loadCaveTexture('wall', (tex) => {
+            for (const m of [rockMat, deepRockMat]) { m.map = tex; m.needsUpdate = true; }
+            rockMat.color.setHex(0xffffff);
+            deepRockMat.color.setHex(0xd8d0cb);
+        });
+        this.loadCaveTexture('floor', (tex) => { floorTexMat.map = tex; floorTexMat.color.setHex(0xe6dcd5); floorTexMat.needsUpdate = true; });
+        this.loadCaveTexture('floorCracked', (tex) => { patchMat.map = tex; patchMat.color.setHex(0xe6dcd5); patchMat.needsUpdate = true; });
+        this.loadCaveTexture('liftWall', (tex) => {
+            for (const m of [frameMat, panelMat]) { m.map = tex; m.color.setHex(0x9a9a9a); m.needsUpdate = true; }
+        });
+        this.loadCaveTexture('crystal', (tex) => {
+            for (const m of crystalMats) { m.map = tex; m.emissiveMap = tex; m.color.setHex(0xffffff); m.needsUpdate = true; }
+            crystalMats[0].emissive.setHex(0xa8f0ff);
+            crystalMats[1].emissive.setHex(0xffd890);
+        });
+
         this.nodeSectionGroup.add(room);
         this.finalPodRoom = room;
-        const podCenterX = offsetX;
-        for (const box of this.sectorArenaCollisions) {
-            const c = box.getCenter(new THREE.Vector3());
-            if (Math.abs(c.x - podCenterX) < 6 && Math.abs(c.z) < 6) boxes.push(box);
-        }
         this.finalPodRoomCollisions = boxes;
     }
 
@@ -1658,7 +1860,8 @@ class LevelManager {
             stalactite: 'barlang%20cseppk%C5%91.jpg',
             tunnel: 'NEW:barlang%20j%C3%A1rat.jpg',
             liftWall: 'NEW:barlang%20lift%20fal.jpg',
-            liftCeiling: 'NEW:barlang%20lift%20mennyezet.jpg'
+            liftCeiling: 'NEW:barlang%20lift%20mennyezet.jpg',
+            podWall: 'NEW:barlang%20talaj.jpg'
         };
         const newBase = 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/46399bd0bc0c099bef3a82537ef5d40017b595e2/Pictures/';
         if (!this.caveTextureCache) this.caveTextureCache = {};
