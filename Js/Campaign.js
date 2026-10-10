@@ -38,7 +38,7 @@ export const researchNodeSection = {
     roomEndDistance: 76,
     exitCorridorEnd: 76,
     liftEndDistance: 76,
-    corridorHalfWidth: 3.2,
+    corridorHalfWidth: 2.95,
     roomHalfWidth: 12,
     lockDistance: 50,
     bossDistance: 68,

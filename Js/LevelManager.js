@@ -244,8 +244,8 @@ class LevelManager {
         const shaftWallHeight = 60.0; // 60 méter magas gigantikus aknanyílás
         const shaftBottom = -60.0;    // Alsó aknamező az emelkedő/süllyedő környezeti tranzithoz
         const shaftTop = 60.0;        // Felső aknamező
-        const doorWidth = 6.4;        // Tágas kapunyílás (Nexus Boss és Tank akadálymentes közlekedéséhez)
-        const doorHeight = 5.2;       // Szabad nyílásmagasság
+        const doorWidth = 5.9;        // A kapumodell belső nyílásához igazítva (a Nexus Boss és a Tank így is átfér)
+        const doorHeight = 4.0;       // A kapumodell belső nyílásához igazítva
         const corridorDepth = 8.5;    // Zsilip alagutak mélysége
         const wallThick = 2.0;        // Fal vastagsága
         const cThick = 1.0;           // Alagút falvastagság
@@ -407,11 +407,12 @@ class LevelManager {
         };
 
         // Északi és Déli falak tömör szakaszai
+        const hw = doorWidth / 2;
         const xIntervals = [
-            [-26.0, -17.2],
-            [-10.8, -3.2],
-            [3.2, 10.8],
-            [17.2, 26.0]
+            [-26.0, -14.0 - hw],
+            [-14.0 + hw, -hw],
+            [hw, 14.0 - hw],
+            [14.0 + hw, 26.0]
         ];
 
         xIntervals.forEach(intv => {
@@ -495,9 +496,14 @@ class LevelManager {
                 doorGroup.add(ribMesh);
             }
 
-            const gateModel = this.createGateModel(assetManager, isXAxis, wallThick + 0.05, doorHeight + 0.1);
+            const gateModel = this.createGateModel(assetManager, isXAxis, wallThick + 0.05);
             if (gateModel) {
-                gateModel.root.position.set(doorCenterX, 0, doorCenterZ);
+                const gateProjection = -0.5;
+                gateModel.root.position.set(
+                    isXAxis ? doorCenterX : doorCenterX + dirSign * gateProjection,
+                    0,
+                    isXAxis ? doorCenterZ + dirSign * gateProjection : doorCenterZ
+                );
                 this.gatesGroup.add(gateModel.root);
                 doorGroup.children.forEach(child => { child.visible = false; });
             }
@@ -1160,7 +1166,7 @@ class LevelManager {
         const wallHeight = 6;
         const t = 0.4;
         const doorHalf = S.corridorHalfWidth;
-        const doorHeight = 5.2;
+        const doorHeight = 4.0;
         const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b3238, metalness: 0.45, roughness: 0.6, emissive: 0x0b1216, emissiveIntensity: 0.6 });
         const wallMat = new THREE.MeshStandardMaterial({ color: 0x3a444c, metalness: 0.35, roughness: 0.6, emissive: 0x10181c, emissiveIntensity: 0.6 });
         const rackMat = new THREE.MeshStandardMaterial({ color: 0x1c2328, metalness: 0.7, roughness: 0.4 });
@@ -1209,7 +1215,7 @@ class LevelManager {
         const makeDoor = (id, d, mat) => {
             const mesh = add(0.6, doorHeight, doorHalf * 2, mat, -d, doorHeight / 2, 0);
             mesh.updateMatrixWorld(true);
-            const gate = this.createGateModel(assetManager, false, 0.7, doorHeight);
+            const gate = this.createGateModel(assetManager, false, 0.7);
             if (gate) {
                 gate.root.position.set(-d, 0, 0);
                 group.add(gate.root);
@@ -1341,7 +1347,7 @@ class LevelManager {
         this.nodeSectionGroup.add(arena);
 
         const doorMat = new THREE.MeshStandardMaterial({ color: 0x555f66, metalness: 0.8, roughness: 0.35, emissive: 0x220508, emissiveIntensity: 0.6 });
-        const slabW = 6.3, slabH = 5.3, slabT = 0.35;
+        const slabW = 5.8, slabH = 4.1, slabT = 0.35;
         const gates = [];
         for (const c of [-14, 0, 14]) {
             gates.push({ x: c, z: -26, w: slabW, d: slabT }, { x: c, z: 26, w: slabW, d: slabT }, { x: -26, z: c, w: slabT, d: slabW });
@@ -1687,9 +1693,10 @@ class LevelManager {
         this.applyReplacedDoors();
     }
 
-    // Animált kapumodell a nyílásba: a modell 9 x 2,8 x 1,5 m, a nyílás méretére nyújtva. Az animációt nem idő, hanem a kapu
+    // Animált kapumodell a nyílásba: a modell 9 x 2,8 x 1,5 m, a belső nyílása kb. 5,9 x 4,0 m (a nyílások ehhez igazodnak). Az animációt nem idő, hanem a kapu
     // haladása (0..1) vezérli, így a nyitás hossza mindig a kapu saját beállításához igazodik.
-    createGateModel(assetManager, crossAxisIsX, depth, height) {
+    createGateModel(assetManager, crossAxisIsX, depth) {
+        const height = 5.3;
         const model = assetManager && assetManager.cloneModel('gate');
         if (!model || !model.animations.length) return null;
         const root = new THREE.Group();
