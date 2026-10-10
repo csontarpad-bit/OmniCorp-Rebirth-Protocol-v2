@@ -495,6 +495,13 @@ class LevelManager {
                 doorGroup.add(ribMesh);
             }
 
+            const gateModel = this.createGateModel(assetManager, isXAxis, wallThick + 0.05, doorHeight + 0.1);
+            if (gateModel) {
+                gateModel.root.position.set(doorCenterX, 0, doorCenterZ);
+                this.gatesGroup.add(gateModel.root);
+                doorGroup.children.forEach(child => { child.visible = false; });
+            }
+
             const closedY = dHeight / 2;
             const openY = closedY + doorHeight + 0.3; // Teljesen felhúzódik a mennyezeti aknába
             doorGroup.position.set(doorCenterX, closedY, doorCenterZ);
@@ -642,6 +649,7 @@ class LevelManager {
                 doorCenterX: doorCenterX,
                 doorCenterZ: doorCenterZ,
                 dirSign: dirSign,
+                gateModel,
                 corridorParts,
                 corridorHitboxes,
                 corridorHitboxBackups: corridorHitboxes.map(box => box.clone()),
@@ -1201,8 +1209,14 @@ class LevelManager {
         const makeDoor = (id, d, mat) => {
             const mesh = add(0.6, doorHeight, doorHalf * 2, mat, -d, doorHeight / 2, 0);
             mesh.updateMatrixWorld(true);
+            const gate = this.createGateModel(assetManager, false, 0.7, doorHeight);
+            if (gate) {
+                gate.root.position.set(-d, 0, 0);
+                group.add(gate.root);
+                mesh.material = new THREE.MeshBasicMaterial({ visible: false });
+            }
             this.nodeDoors.push({
-                id, mesh,
+                id, mesh, gate,
                 box: new THREE.Box3().setFromObject(mesh),
                 progress: 0,
                 target: 0,
@@ -1629,6 +1643,7 @@ class LevelManager {
             door.target = 0;
             door.mesh.position.y = door.closedY;
             door.mesh.visible = true;
+            if (door.gate) door.gate.setProgress(0);
         }
         if (this.nodeTerminalGroup) this.nodeTerminalGroup.visible = true;
         this.setSectorPodActive(false);
@@ -1662,6 +1677,7 @@ class LevelManager {
             if (Math.abs(door.progress - door.target) < 0.005) door.progress = door.target;
             door.mesh.position.y = door.closedY + (door.openY - door.closedY) * door.progress;
             door.mesh.visible = door.progress < 0.99;
+            if (door.gate) door.gate.setProgress(door.progress * door.progress * (3 - 2 * door.progress));
         }
     }
 
@@ -1669,6 +1685,37 @@ class LevelManager {
         if (this.researchRoomsActive === isActive) return;
         this.researchRoomsActive = isActive;
         this.applyReplacedDoors();
+    }
+
+    // Animált kapumodell a nyílásba: a modell 9 x 2,8 x 1,5 m, a nyílás méretére nyújtva. Az animációt nem idő, hanem a kapu
+    // haladása (0..1) vezérli, így a nyitás hossza mindig a kapu saját beállításához igazodik.
+    createGateModel(assetManager, crossAxisIsX, depth, height) {
+        const model = assetManager && assetManager.cloneModel('gate');
+        if (!model || !model.animations.length) return null;
+        const root = new THREE.Group();
+        const inner = model.mesh;
+        inner.scale.multiplyScalar(0.01);
+        inner.scale.set(inner.scale.x * 1.1, inner.scale.y * height / 2.8, inner.scale.z * depth / 1.5);
+        root.add(inner);
+        if (!crossAxisIsX) root.rotation.y = Math.PI / 2;
+        inner.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
+        const clip = model.animations.find(a => a.name === 'Door_open') || model.animations[0];
+        const mixer = new THREE.AnimationMixer(inner);
+        const action = mixer.clipAction(clip);
+        action.play();
+        action.paused = true;
+        const gate = {
+            root,
+            lastProgress: -1,
+            setProgress(value) {
+                if (gate.lastProgress === value) return;
+                gate.lastProgress = value;
+                action.time = clip.duration * THREE.MathUtils.clamp(value, 0, 1);
+                mixer.update(0);
+            }
+        };
+        gate.setProgress(0);
+        return gate;
     }
 
     // A kapuk mögötti alap folyosót az R&D szoba vagy a szerverfolyosó váltja ki
@@ -2808,6 +2855,7 @@ class LevelManager {
                 const tVal = d.progress;
                 const ease = tVal * tVal * (3 - 2 * tVal);
                 d.group.position.y = THREE.MathUtils.lerp(d.closedY, d.openY, ease);
+                if (d.gateModel) d.gateModel.setProgress(ease);
 
                 if (d.progress >= 0.8) {
                     d.hitbox.makeEmpty();
