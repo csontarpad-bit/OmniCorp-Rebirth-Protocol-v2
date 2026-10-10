@@ -2284,8 +2284,10 @@ class LevelManager {
     openDoors(duration = 7.5) {
         if (this.cabinGroup && this.cabinGroup.visible) {
             this.cabinDoorTarget = 0;
-            if (!this.caveShellHidden) this.hideSingleCabin();
+            if (!this.caveShellHidden && !this.finalPodRoomActive) this.hideSingleCabin();
         }
+        // A 101. szinten a lift indulása elrejti a kabint, ezért a megérkezéskor újra meg kell jeleníteni
+        if (this.finalPodRoomActive) this.showSingleCabin(-sectorHallCenter, 0);
         this.isDoorsOpen = true;
         this.elevatorTransitTimer = 0;
         this.smokeTickTimer = 0.0;
