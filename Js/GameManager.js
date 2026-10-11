@@ -807,6 +807,7 @@ export class GameManager {
         if (this.weaponSystem) this.weaponSystem.holsterForTerminal();
         this.gameState = 'TERMINAL_TRANSITION';
         this.terminalSequence = 'enter-opening';
+        this.terminalEnterBaseEuler = null;
         this.terminalSequenceTime = 0;
         this.player.playerVelX = 0;
         this.player.playerVelZ = 0;
@@ -1084,6 +1085,8 @@ export class GameManager {
             if (doorProgress <= 0.02 || t >= 1.2) {
                 this.liftExitStage = 'done';
                 this.liftExitPending = false;
+                this.liftPassengerLock = false;
+                this.liftPassengerPos = null;
                 this.liftLook = null;
             }
         }
@@ -1139,14 +1142,30 @@ export class GameManager {
         if (this.terminalSequence === 'enter-opening' && activePodDoorProgress >= 0.98) {
             this.startTerminalMove({ x: this.activePodIsSector ? -sectorHallCenter : 0, y: 1.6, z: 0.15 }, 'enter-moving');
         } else if (this.terminalSequence === 'enter-moving') {
-            const progress = Math.min(1, this.terminalSequenceTime / 1.0);
+            const progress = Math.min(1, this.terminalSequenceTime / 1.8);
             const eased = progress * progress * (3 - 2 * progress);
+            const sway = Math.sin(progress * Math.PI * 3);
+            const envelope = Math.sin(progress * Math.PI);
             this.player.camera.position.set(
-                this.terminalMoveFrom.x + (this.terminalMoveTo.x - this.terminalMoveFrom.x) * eased,
-                this.terminalMoveFrom.y + (this.terminalMoveTo.y - this.terminalMoveFrom.y) * eased,
+                this.terminalMoveFrom.x + (this.terminalMoveTo.x - this.terminalMoveFrom.x) * eased + sway * 0.03 * envelope,
+                this.terminalMoveFrom.y + (this.terminalMoveTo.y - this.terminalMoveFrom.y) * eased - Math.abs(sway) * 0.04 * envelope,
                 this.terminalMoveFrom.z + (this.terminalMoveTo.z - this.terminalMoveFrom.z) * eased
             );
+            // Belépéskor a játékos körbenéz a kabinban: oldalra fordul, kissé lebillen, majd visszanéz előre
+            if (!this.terminalEnterBaseEuler) {
+                this.terminalEnterBaseEuler = new THREE.Euler().setFromQuaternion(this.player.camera.quaternion, 'YXZ');
+            }
+            const base = this.terminalEnterBaseEuler;
+            const look = Math.sin(progress * Math.PI * 2) * envelope;
+            this.player.camera.quaternion.setFromEuler(new THREE.Euler(
+                base.x - 0.07 * envelope + Math.sin(progress * Math.PI * 2.5) * 0.03,
+                base.y + look * 0.55,
+                Math.sin(progress * Math.PI * 2) * 0.025 * envelope,
+                'YXZ'
+            ));
             if (progress >= 1) {
+                this.player.camera.quaternion.setFromEuler(new THREE.Euler(base.x, base.y, 0, 'YXZ'));
+                this.terminalEnterBaseEuler = null;
                 this.terminalSequence = 'enter-closing';
                 this.terminalSequenceTime = 0;
                 this.levelManager.setPodDoorOpen(false, this.activePodIsSector);
