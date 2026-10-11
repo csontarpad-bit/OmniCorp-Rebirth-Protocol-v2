@@ -1012,6 +1012,11 @@ export class WeaponSystem {
         this.inputManagerRef = inputManager;
         this.playerRef = player;
 
+        // A terminálból való kilépés átmenete a játékállapot visszaállítása után is fejeződjön be.
+        if (this.terminalWeaponTransition) {
+            this.updateTerminalTransition(delta);
+        }
+
         if (this.muzzleFlash && this.muzzleFlash.intensity > 0) {
             this.muzzleFlash.intensity = Math.max(0, this.muzzleFlash.intensity - delta * 30);
         }

@@ -45,6 +45,9 @@ class LevelManager {
         this.researchRoomsActive = false;
         this.lightBlinkTimer = 0;
         this.elevatorTransitTimer = 0;
+        this.transitRamps = [];
+        this.transitRampMaterial = null;
+        this.isElevatorBraking = false;
 
         // Változó színű haladó aknalámpák (piros -> sárga -> zöld)
         this.shaftLightTiers = [];
@@ -164,6 +167,8 @@ class LevelManager {
         this.shaftLightTiers = [];
         this.dynamicLightCandidates = [];
         this.transitShutters = [];
+        this.transitRamps = [];
+        this.transitRampMaterial = null;
         this.isDoorsOpen = false;
         this.smokeTickTimer = 0.0;
         this.isElevatorMoving = false;
@@ -172,6 +177,7 @@ class LevelManager {
         this.targetElevatorSpeed = 0;
         this.lightBlinkTimer = 0;
         this.elevatorTransitTimer = 0;
+        this.isElevatorBraking = false;
 
         // Textúrák bekérése az AssetManager-től
         const floorTex = assetManager.loadTexture('floor', 'https://raw.githubusercontent.com/csontarpad-bit/-OmniCorp-Rebirth-Protocol/35c845f70c8ae3a8577562a70a9abac70baadcf1/Pictures/LVL3%20Floor.png', true);
@@ -244,14 +250,17 @@ class LevelManager {
         const shaftWallHeight = 60.0; // 60 méter magas gigantikus aknanyílás
         const shaftBottom = -60.0;    // Alsó aknamező az emelkedő/süllyedő környezeti tranzithoz
         const shaftTop = 60.0;        // Felső aknamező
-        const doorWidth = 5.9;        // A kapumodell belső nyílásához igazítva (a Nexus Boss és a Tank így is átfér)
-        const doorHeight = 4.0;       // A kapumodell belső nyílásához igazítva
+        const doorWidth = 9.8;        // A kapukeret teljes szélességéhez igazított zsilipnyílás
+        const doorHeight = 5.3;       // A kapukeret teljes magasságához igazított zsilipnyílás
         const corridorDepth = 8.5;    // Zsilip alagutak mélysége
         const wallThick = 2.0;        // Fal vastagsága
         const cThick = 1.0;           // Alagút falvastagság
 
-        // 1. LIFT PADLÓ PLATFORM (50x50m)
-        const mainFloor = new THREE.Mesh(new THREE.PlaneGeometry(arenaSize, arenaSize), floorMat);
+        const doorCenters = [-14.0, 0.0, 14.0];
+
+        // 1. LIFT PADLÓ PLATFORM (46x46m), körben nyitott aknaréssel
+        const platformSize = arenaSize - 4.0;
+        const mainFloor = new THREE.Mesh(new THREE.PlaneGeometry(platformSize, platformSize), floorMat);
         mainFloor.rotation.x = -Math.PI / 2;
         this.scene.add(mainFloor);
 
@@ -261,14 +270,17 @@ class LevelManager {
         this.setCampaignFloor(1);
 
         // Ipari acél szegély a lift peremén
-        const borderGeoX = new THREE.BoxGeometry(arenaSize, 0.15, 0.4);
-        const borderGeoZ = new THREE.BoxGeometry(0.4, 0.15, arenaSize);
+        const borderGeoX = new THREE.BoxGeometry(platformSize, 0.15, 0.4);
+        const borderGeoZ = new THREE.BoxGeometry(0.4, 0.15, platformSize);
         const bMat = new THREE.MeshStandardMaterial({ color: 0x333942, metalness: 0.8, roughness: 0.3 });
 
-        const bN = new THREE.Mesh(borderGeoX, bMat); bN.position.set(0, 0.075, -arenaSize / 2); this.scene.add(bN);
-        const bS = new THREE.Mesh(borderGeoX, bMat); bS.position.set(0, 0.075, arenaSize / 2); this.scene.add(bS);
-        const bW = new THREE.Mesh(borderGeoZ, bMat); bW.position.set(-arenaSize / 2, 0.075, 0); this.scene.add(bW);
-        const bE = new THREE.Mesh(borderGeoZ, bMat); bE.position.set(arenaSize / 2, 0.075, 0); this.scene.add(bE);
+        const platformHalf = platformSize / 2;
+        this.liftPlatformHalf = platformHalf;
+        this.liftGateCenters = doorCenters;
+        const bN = new THREE.Mesh(borderGeoX, bMat); bN.position.set(0, 0.075, -platformHalf); this.scene.add(bN);
+        const bS = new THREE.Mesh(borderGeoX, bMat); bS.position.set(0, 0.075, platformHalf); this.scene.add(bS);
+        const bW = new THREE.Mesh(borderGeoZ, bMat); bW.position.set(-platformHalf, 0.075, 0); this.scene.add(bW);
+        const bE = new THREE.Mesh(borderGeoZ, bMat); bE.position.set(platformHalf, 0.075, 0); this.scene.add(bE);
 
         // --- 2. EGYSÉGESÍTETT, EGYBEFÜGGŐ FALGEOMETRIA (EXTRUDEGEOMETRY 3 KAPUNYÍLÁSSAL) ---
         // A fal nincs darabokra vagdosva: egyetlen, összefüggő 52 méteres tömör falfelület 3 zsilipnyílással
@@ -280,7 +292,6 @@ class LevelManager {
         wallShape.lineTo(-26.0, shaftTop);
         wallShape.closePath();
 
-        const doorCenters = [-14.0, 0.0, 14.0];
         doorCenters.forEach(xc => {
             const hole = new THREE.Path();
             hole.moveTo(xc - doorWidth / 2, 0.0);
@@ -398,6 +409,59 @@ class LevelManager {
             addShutter(sMesh, zc);
         });
 
+        // Behúzható rámpák a liftperem és a kapuk küszöbei között.
+        const rampMat = new THREE.MeshStandardMaterial({
+            color: 0x4b555b,
+            metalness: 0.85,
+            roughness: 0.38
+        });
+        this.transitRampMaterial = rampMat;
+        this.loadCaveTexture('liftWall', (tex) => {
+            rampMat.map = tex;
+            rampMat.color.setHex(0x8c8c8c);
+            rampMat.needsUpdate = true;
+        });
+        const rampLength = 2.0;
+        const addRamp = (axis, center, side) => {
+            const isZAxis = axis === 'z';
+            const geometry = isZAxis
+                ? new THREE.BoxGeometry(doorWidth, 0.18, rampLength)
+                : new THREE.BoxGeometry(rampLength, 0.18, doorWidth);
+            const hinge = new THREE.Group();
+            const panel = new THREE.Mesh(geometry, rampMat);
+            const closedRotation = new THREE.Euler();
+            const openRotation = new THREE.Euler();
+            if (isZAxis) {
+                hinge.position.set(center, 0.09, side * platformHalf);
+                panel.position.z = side * rampLength / 2;
+                closedRotation.x = -side * Math.PI / 2;
+            } else {
+                hinge.position.set(side * platformHalf, 0.09, center);
+                panel.position.x = side * rampLength / 2;
+                closedRotation.z = side * Math.PI / 2;
+            }
+            hinge.rotation.copy(closedRotation);
+            hinge.add(panel);
+            hinge.visible = false;
+            this.scene.add(hinge);
+            this.transitRamps.push({
+                hinge,
+                panel,
+                closedRotation,
+                openRotation,
+                progress: 0,
+                targetProgress: 0
+            });
+        };
+        doorCenters.forEach(xc => {
+            addRamp('z', xc, -1);
+            addRamp('z', xc, 1);
+        });
+        doorCenters.forEach(zc => {
+            addRamp('x', zc, -1);
+            addRamp('x', zc, 1);
+        });
+
         // Solid fal ütközésdobozok (Box3) hozzáadása a 4 szakaszhoz falanként (ajtónyílások szabadon hagyásával)
         const addWallHitbox = (minX, minY, minZ, maxX, maxY, maxZ) => {
             this.wallHitboxes.push(new THREE.Box3(
@@ -462,20 +526,9 @@ class LevelManager {
         // --- 4. ZSILIPKAPU GYÁRTÓ SEGÉDFÜGGVÉNY (VIBRÁLÁS ÉS FEDÉSMENTES KIALAKÍTÁS) ---
         // A kapulap tisztán a falnyílás belsejében mozog, nincs közös lapja a falakkal, így zéró Z-fighting!
         const createAirlock = (doorCenterX, doorCenterZ, isXAxis, dirSign) => {
-            // A) ZSILIPKERET ÉS ÁTHIDALÓ
-            const frameGroup = new THREE.Group();
-            
-            // Felső áthidaló gerenda a kapu felett (Y = 5.25)
-            const lintelGeo = isXAxis 
-                ? new THREE.BoxGeometry(doorWidth + 0.1, 0.3, wallThick + 0.05)
-                : new THREE.BoxGeometry(wallThick + 0.05, 0.3, doorWidth + 0.1);
-            const lintelMesh = new THREE.Mesh(lintelGeo, portalFrameMat);
-            lintelMesh.position.set(doorCenterX, doorHeight + 0.15, doorCenterZ);
-            this.gatesGroup.add(lintelMesh);
-
-            // B) CSÚSZÓ PÁNCÉLAJTÓ LAP
+            // CSÚSZÓ PÁNCÉLAJTÓ LAP
             const doorGroup = new THREE.Group();
-            const dWidth = doorWidth - 0.1; // 6.3m széles, kényelmesen elfér a 6.4m-es nyílásban
+            const dWidth = doorWidth - 0.1;
             const dHeight = doorHeight + 0.1;
             const dThick = 0.35;
 
@@ -498,7 +551,7 @@ class LevelManager {
 
             const gateModel = this.createGateModel(assetManager, isXAxis, wallThick + 0.05);
             if (gateModel) {
-                const gateProjection = -0.5;
+                const gateProjection = 0.15;
                 gateModel.root.position.set(
                     isXAxis ? doorCenterX : doorCenterX + dirSign * gateProjection,
                     0,
@@ -513,30 +566,10 @@ class LevelManager {
             doorGroup.position.set(doorCenterX, closedY, doorCenterZ);
             this.gatesGroup.add(doorGroup);
 
-            // C) ZSILIP ÁLLAPOTJELZŐ NEON FÉNY AZ ÁTHIDALÓN
-            const lightGeo = new THREE.BoxGeometry(isXAxis ? 1.4 : 0.25, 0.2, isXAxis ? 0.25 : 1.4);
-            const lightMat = new THREE.MeshBasicMaterial({ color: 0xff1500 });
-            const lightMesh = new THREE.Mesh(lightGeo, lightMat);
-            const inwardOffset = -dirSign * 1.05;
-
-            if (isXAxis) {
-                lightMesh.position.set(doorCenterX, doorHeight + 0.45, doorCenterZ + inwardOffset);
-            } else {
-                lightMesh.position.set(doorCenterX + inwardOffset, doorHeight + 0.45, doorCenterZ);
-            }
-            this.gatesGroup.add(lightMesh);
-
-            const pLight = new THREE.PointLight(0xff1500, 0.9, 8);
-            pLight.position.copy(lightMesh.position);
-            this.gatesGroup.add(pLight);
-            this.sterilizationLights.push({ light: pLight, mesh: lightMesh });
-            const gateLight = { light: pLight, rangeSq: 64, distanceSq: Infinity, tier: null };
-            this.dynamicLightCandidates.push(gateLight);
-
             const corridorChildStart = this.gatesGroup.children.length;
             const corridorHitboxStart = this.wallHitboxes.length;
 
-            // D) ZSILIP ALAGÚT A FAL MÖGÖTT
+            // ZSILIP ALAGÚT A FAL MÖGÖTT
             const corridorMidZ = isXAxis ? doorCenterZ + dirSign * (wallThick / 2 + corridorDepth / 2) : doorCenterZ;
             const corridorMidX = isXAxis ? doorCenterX : doorCenterX + dirSign * (wallThick / 2 + corridorDepth / 2);
 
@@ -643,8 +676,8 @@ class LevelManager {
 
             const doorObj = {
                 group: doorGroup,
-                lightMesh: lightMesh,
-                pointLight: pLight,
+                lightMesh: null,
+                pointLight: null,
                 closedY: closedY,
                 openY: openY,
                 progress: 0.0,
@@ -664,9 +697,8 @@ class LevelManager {
                 isNodeDoor: !isXAxis && doorCenterZ === 0 && dirSign === -1,
                 replaced: false
             };
-
             this.doors.push(doorObj);
-            this.warningLights.push({ mesh: lightMesh, light: pLight });
+            this.doors.push(doorObj);
 
             return doorObj;
         };
@@ -1043,7 +1075,30 @@ class LevelManager {
         this.scene.add(group);
 
         const rotations = { armory: 0, regeneration: Math.PI, comms: Math.PI / 2, augmentation: -Math.PI / 2 };
-        const blocking = [];
+        const addWallCollision = (rotation, localX, localZ, width, depth) => {
+            let worldX = localX;
+            let worldZ = localZ;
+            let worldWidth = width;
+            let worldDepth = depth;
+            if (rotation === Math.PI) {
+                worldX = -localX;
+                worldZ = -localZ;
+            } else if (rotation === Math.PI / 2) {
+                worldX = -localZ;
+                worldZ = localX;
+                worldWidth = depth;
+                worldDepth = width;
+            } else if (rotation === -Math.PI / 2) {
+                worldX = localZ;
+                worldZ = -localX;
+                worldWidth = depth;
+                worldDepth = width;
+            }
+            this.researchHubCollisions.push(new THREE.Box3(
+                new THREE.Vector3(worldX - worldWidth / 2, 0, worldZ - worldDepth / 2),
+                new THREE.Vector3(worldX + worldWidth / 2, wallHeight, worldZ + worldDepth / 2)
+            ));
+        };
 
         for (const station of researchHubStations) {
             const room = new THREE.Group();
@@ -1053,16 +1108,23 @@ class LevelManager {
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.position.set(x, y, z);
                 room.add(mesh);
-                if (blocks) blocking.push(mesh);
                 return mesh;
             };
             const color = new THREE.Color(station.color);
 
             add(new THREE.BoxGeometry(roomHalfWidth * 2, 0.2, roomDepth), floorMaterial, 0, 0.02, -roomCenter);
             add(new THREE.BoxGeometry(roomHalfWidth * 2 + wallThickness * 2, 0.3, roomDepth), wallMaterial, 0, wallHeight, -roomCenter);
-            add(new THREE.BoxGeometry(wallThickness, wallHeight, roomDepth), wallMaterial, -roomHalfWidth - wallThickness / 2, wallHeight / 2, -roomCenter, true);
-            add(new THREE.BoxGeometry(wallThickness, wallHeight, roomDepth), wallMaterial, roomHalfWidth + wallThickness / 2, wallHeight / 2, -roomCenter, true);
-            add(new THREE.BoxGeometry(roomHalfWidth * 2 + wallThickness * 2, wallHeight, wallThickness), wallMaterial, 0, wallHeight / 2, -roomEnd - wallThickness / 2, true);
+            const sideWallWidth = wallThickness;
+            const sideWallX = roomHalfWidth + wallThickness / 2;
+            add(new THREE.BoxGeometry(sideWallWidth, wallHeight, roomDepth), wallMaterial, -sideWallX, wallHeight / 2, -roomCenter);
+            add(new THREE.BoxGeometry(sideWallWidth, wallHeight, roomDepth), wallMaterial, sideWallX, wallHeight / 2, -roomCenter);
+            addWallCollision(rotations[station.id], -sideWallX, -roomCenter, sideWallWidth, roomDepth);
+            addWallCollision(rotations[station.id], sideWallX, -roomCenter, sideWallWidth, roomDepth);
+
+            const backWallWidth = roomHalfWidth * 2 + wallThickness * 2;
+            const backWallZ = -roomEnd - wallThickness / 2;
+            add(new THREE.BoxGeometry(backWallWidth, wallHeight, wallThickness), wallMaterial, 0, wallHeight / 2, backWallZ);
+            addWallCollision(rotations[station.id], 0, backWallZ, backWallWidth, wallThickness);
 
             for (const z of [-roomStart - 4, -roomStart - 11]) {
                 add(new THREE.BoxGeometry(5, 0.08, 1.2), panelMaterial, 0, wallHeight - 0.2, z);
@@ -1084,9 +1146,7 @@ class LevelManager {
                 this.researchRoomLights.push(light);
             }
         }
-
         group.updateMatrixWorld(true);
-        for (const mesh of blocking) this.researchHubCollisions.push(new THREE.Box3().setFromObject(mesh));
         this.createNodeSection(assetManager);
     }
 
@@ -1693,7 +1753,7 @@ class LevelManager {
         this.applyReplacedDoors();
     }
 
-    // Animált kapumodell a nyílásba: a modell 9 x 2,8 x 1,5 m, a belső nyílása kb. 5,9 x 4,0 m (a nyílások ehhez igazodnak). Az animációt nem idő, hanem a kapu
+    // Animált kapumodell a nyílásba: a modell 9 x 2,8 x 1,5 m, a teljes kerethez igazított nyílásban. Az animációt nem idő, hanem a kapu
     // haladása (0..1) vezérli, így a nyitás hossza mindig a kapu saját beállításához igazodik.
     createGateModel(assetManager, crossAxisIsX, depth) {
         const height = 5.3;
@@ -1983,6 +2043,11 @@ class LevelManager {
             mats.wall.map = tex;
             mats.wall.color.setHex(0x8c8c8c);
             mats.wall.needsUpdate = true;
+            if (this.transitRampMaterial) {
+                this.transitRampMaterial.map = tex;
+                this.transitRampMaterial.color.setHex(0x8c8c8c);
+                this.transitRampMaterial.needsUpdate = true;
+            }
         });
         this.loadCaveTexture('liftWall', (tex) => {
             mats.frame.map = tex;
@@ -2451,9 +2516,11 @@ class LevelManager {
         else this.hideSingleCabin();
         if (this.cabinGroup && this.cabinGroup.visible) this.cabinDoorTarget = 1;
         this.targetElevatorSpeed = 0.8; // 50%-kal lassabb sebesség a felvonó mozgásához (1.6 helyett 0.8)
+        this.isElevatorBraking = false;
         this.elevatorTransitTimer = 0;
         if (this.gatesGroup) {
-            this.gatesGroup.visible = false;
+            // A kapuk a falban maradnak; liftezés közben a zárt fedőpanelek takarják őket.
+            this.gatesGroup.visible = true;
         }
         if (this.transitShutters) {
             for (let i = 0; i < this.transitShutters.length; i++) {
@@ -2464,11 +2531,18 @@ class LevelManager {
                 s.mesh.visible = true;
             }
         }
+        for (const ramp of this.transitRamps) {
+            ramp.progress = 0;
+            ramp.targetProgress = 0;
+            ramp.hinge.rotation.copy(ramp.closedRotation);
+            ramp.hinge.visible = true;
+        }
     }
 
     stopElevator() {
         this.targetElevatorSpeed = 0.0;
-        // Fékezés indítása. A kapuk és a fedőpanelek nyitása szigorúan a teljes megálláskor (8.0s / openDoors) történik!
+        this.isElevatorBraking = true;
+        // Fékezéskor a fedőpanelek a lift sebességével arányosan húzódnak fel.
     }
 
     getGatePouringPositions() {
@@ -2576,6 +2650,7 @@ class LevelManager {
         // A 101. szinten a lift indulása elrejti a kabint, ezért a megérkezéskor újra meg kell jeleníteni
         if (this.finalPodRoomActive) this.showSingleCabin(-sectorHallCenter, 0);
         this.isDoorsOpen = true;
+        this.isElevatorBraking = false;
         this.elevatorTransitTimer = 0;
         this.smokeTickTimer = 0.0;
         this.isElevatorMoving = false;
@@ -2589,8 +2664,12 @@ class LevelManager {
                 const s = this.transitShutters[i];
                 s.progress = 1.0;
                 s.targetProgress = 1.0;
-                s.mesh.visible = false;
+                s.mesh.visible = true;
             }
+        }
+        for (const ramp of this.transitRamps) {
+            ramp.targetProgress = 1;
+            ramp.hinge.visible = true;
         }
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
@@ -2610,6 +2689,7 @@ class LevelManager {
 
     closeDoors(duration = 1.5) {
         this.isDoorsOpen = false;
+        this.isElevatorBraking = false;
         if (this.transitShutters) {
             for (let i = 0; i < this.transitShutters.length; i++) {
                 const s = this.transitShutters[i];
@@ -2618,6 +2698,9 @@ class LevelManager {
                 s.mesh.position.y = s.closedY;
                 s.mesh.visible = true;
             }
+        }
+        for (const ramp of this.transitRamps) {
+            ramp.targetProgress = 0;
         }
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
@@ -2746,24 +2829,57 @@ class LevelManager {
         }
 
         // 0. Flush Zsilipfedő Panelek (Transit Shutters) és Kapuk szinkronizálása:
-        // Liftezés alatt a fedőpanelek tökéletesen a fal belső síkjában fedik a nyílásokat,
-        // 100%-ban szinkronban görgőzve a fallal (nincs külön elmozdulás vagy textúra-elcsúszás).
-        // A lift teljes megállásakor (openDoors hívásakor) a fedőpanelek eltűnnek,
-        // azonnal felfedve a zárt zsilipkapukat, melyek ekkor zöld fénnyel és gőzzel kinyílnak!
+        // Menet közben a fedőpanelek takarják a nyílásokat. Fékezéskor a lift sebességével
+        // arányosan felcsúsznak, így a kapumodell fokozatosan válik láthatóvá.
         if (this.transitShutters) {
+            if (this.isElevatorBraking && !this.isDoorsOpen) {
+                const cruiseSpeed = 0.8;
+                const speedRatio = THREE.MathUtils.clamp(
+                    Math.abs(this.elevatorSpeed) / cruiseSpeed,
+                    0,
+                    1
+                );
+                const brakingReveal = 1 - speedRatio;
+                const reveal = brakingReveal * brakingReveal * (3 - 2 * brakingReveal);
+                for (const shutter of this.transitShutters) {
+                    shutter.targetProgress = Math.max(shutter.targetProgress, reveal);
+                }
+            }
             for (let i = 0; i < this.transitShutters.length; i++) {
                 const s = this.transitShutters[i];
-                s.mesh.visible = (s.progress < 0.5);
+                if (s.progress !== s.targetProgress) {
+                    s.progress = THREE.MathUtils.damp(s.progress, s.targetProgress, 5, delta);
+                    if (Math.abs(s.progress - s.targetProgress) < 0.005) {
+                        s.progress = s.targetProgress;
+                    }
+                    const eased = s.progress * s.progress * (3 - 2 * s.progress);
+                    s.mesh.position.y = THREE.MathUtils.lerp(s.closedY, s.openY, eased);
+                }
+                s.mesh.visible = s.progress < 0.99;
             }
+        }
+        for (const ramp of this.transitRamps) {
+            if (ramp.progress !== ramp.targetProgress) {
+                ramp.progress = THREE.MathUtils.damp(ramp.progress, ramp.targetProgress, 6, delta);
+                if (Math.abs(ramp.progress - ramp.targetProgress) < 0.005) {
+                    ramp.progress = ramp.targetProgress;
+                }
+                ramp.hinge.rotation.x = THREE.MathUtils.lerp(
+                    ramp.closedRotation.x,
+                    ramp.openRotation.x,
+                    ramp.progress
+                );
+                ramp.hinge.rotation.z = THREE.MathUtils.lerp(
+                    ramp.closedRotation.z,
+                    ramp.openRotation.z,
+                    ramp.progress
+                );
+            }
+            ramp.hinge.visible = true;
         }
 
         if (this.gatesGroup) {
             this.gatesGroup.position.y = 0.0;
-            // Liftezés alatt a teljes kapuegység (keret, állapotjelzők, ajtólapok)
-            // szigorúan rejtve van, a kapuk megjelenése a megérkezéshez (openDoors) kötött.
-            if (this.isElevatorMoving) {
-                this.gatesGroup.visible = false;
-            }
         }
         if (this.caveShellHidden) {
             this.applyCaveAtmosphere(true);
@@ -2932,19 +3048,42 @@ class LevelManager {
                 return true;
             }
         }
+        if (!this.isElevatorMoving && !this.caveShellHidden && this.liftPlatformHalf !== undefined) {
+            const half = this.liftPlatformHalf;
+            const rampHalfWidth = 3.0;
+            const gateApproachDepth = 36.0;
+            const alignedWithNorthSouthGate = this.liftGateCenters.some(center => Math.abs(x - center) <= rampHalfWidth);
+            const alignedWithWestEastGate = this.liftGateCenters.some(center => Math.abs(z - center) <= rampHalfWidth);
+            const nearNorthSouthRamp = Math.abs(Math.abs(z) - half) <= r + 0.4 && alignedWithNorthSouthGate;
+            const nearWestEastRamp = Math.abs(Math.abs(x) - half) <= r + 0.4 && alignedWithWestEastGate;
+            const inNorthSouthGateApproach = Math.abs(z) <= gateApproachDepth && alignedWithNorthSouthGate;
+            const inWestEastGateApproach = Math.abs(x) <= gateApproachDepth && alignedWithWestEastGate;
+            const outsidePlatform = x - r < -half || x + r > half || z - r < -half || z + r > half;
+            if (outsidePlatform &&
+                !nearNorthSouthRamp &&
+                !nearWestEastRamp &&
+                !inNorthSouthGateApproach &&
+                !inWestEastGateApproach) return true;
+        }
         const minX = x - r;
         const maxX = x + r;
         const minZ = z - r;
         const maxZ = z + r;
+        const researchEntryCorridor = this.isResearchHubVisible &&
+            (((Math.abs(z) >= 23 && Math.abs(z) <= 36 && Math.abs(x) <= 5.2) ||
+                (Math.abs(x) >= 23 && Math.abs(x) <= 36 && Math.abs(z) <= 5.2)));
         for (let i = 0; i < this.wallHitboxes.length; i++) {
-            if (this.collisionBoxOverlapsAabb(this.wallHitboxes[i], minX, maxX, minZ, maxZ)) return true;
+            if (!researchEntryCorridor &&
+                this.collisionBoxOverlapsAabb(this.wallHitboxes[i], minX, maxX, minZ, maxZ)) return true;
         }
         for (let i = 0; i < this.activeSectorPropCollisions.length; i++) {
             if (this.collisionBoxOverlapsAabb(this.activeSectorPropCollisions[i], minX, maxX, minZ, maxZ)) return true;
         }
         if (this.isResearchHubVisible) {
-            for (let i = 0; i < this.researchHubCollisions.length; i++) {
-                if (this.collisionBoxOverlapsAabb(this.researchHubCollisions[i], minX, maxX, minZ, maxZ)) return true;
+            if (!researchEntryCorridor) {
+                for (let i = 0; i < this.researchHubCollisions.length; i++) {
+                    if (this.collisionBoxOverlapsAabb(this.researchHubCollisions[i], minX, maxX, minZ, maxZ)) return true;
+                }
             }
         }
         if (this.isNodeSectionVisible) {
@@ -2962,6 +3101,7 @@ class LevelManager {
         for (let i = 0; i < this.doors.length; i++) {
             const d = this.doors[i];
             if (d.progress < 0.8 && !d.hitbox.isEmpty()) {
+                if (researchEntryCorridor && d.isResearchDoor) continue;
                 if (this.collisionBoxOverlapsAabb(d.hitbox, minX, maxX, minZ, maxZ)) return true;
             }
         }

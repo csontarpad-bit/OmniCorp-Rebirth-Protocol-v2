@@ -18,6 +18,11 @@ export class GameManager {
         this.nodeState = 'none';
         this.finalLiftStarted = false;
         this.liftPassengerLock = false;
+        this.liftExitPending = false;
+        this.liftExitIsSectorPod = false;
+        this.liftExitFrom = null;
+        this.liftExitTo = null;
+        this.liftExitTimer = 0;
         this.pendingGateArrival = false;
         this.pendingTargetFloor = null;
         this.enemiesToSpawn = 5;
@@ -133,8 +138,8 @@ export class GameManager {
                 EventBus.emit('RESEARCH_TERMINAL_CLOSE', { station: this.activeResearchStation });
                 return;
             }
-            if (this.gameState !== 'SHOPPING' || (!this.terminalReady && !this.activePodIsSector) || this.terminalSequence !== 'menu') return;
-            this.beginTerminalExit();
+            if (this.gameState !== 'SHOPPING' || this.isResearchHubActive) return;
+            this.beginLiftFromTerminal();
         });
         EventBus.on('CHANGE_GAME_STATE', (state) => { this.gameState = state; });
         EventBus.on('RETURN_TO_MAIN_MENU', () => this.onReturnToMainMenu());
@@ -202,6 +207,10 @@ export class GameManager {
         this.isElevating = false;
         this.elevatorPhase = 'idle';
         this.liftPassengerLock = false;
+        this.liftExitPending = false;
+        this.liftExitIsSectorPod = false;
+        this.liftExitFrom = null;
+        this.liftExitTo = null;
         if (this.waveTimeout) {
             clearTimeout(this.waveTimeout);
             this.waveTimeout = null;
@@ -865,19 +874,19 @@ export class GameManager {
         }
     }
 
-    // Interakció után a játékos magától besétál a kabin közepére, ott megáll, és csak ezután indul a lift
+    // A lift az indítógomb megnyomásakor azonnal elindul; a játékos marad a jelenlegi kabinpozícióban.
     beginFinalLiftEntry() {
+        if (!this.levelManager || this.terminalSequence !== 'idle') return;
         this.finalLiftStarted = true;
-        this.gameState = 'TERMINAL_TRANSITION';
-        this.terminalSequence = 'lift-walking';
-        this.terminalSequenceTime = 0;
+        this.gameState = 'PLAYING';
+        this.terminalSequence = 'idle';
         this.player.playerVelX = 0;
         this.player.playerVelZ = 0;
         const position = this.player.camera.position;
-        this.terminalMoveFrom = { x: position.x, y: position.y, z: position.z };
-        this.terminalMoveTo = { x: -sectorHallCenter, y: position.y, z: 0 };
-        const distance = Math.hypot(this.terminalMoveTo.x - position.x, this.terminalMoveTo.z - position.z);
-        this.liftWalkDuration = Math.max(0.9, distance / 1.8);
+        this.liftPassengerLock = true;
+        this.liftPassengerPos = { x: position.x, z: position.z };
+        EventBus.emit('MAGLIFT_DEPARTING');
+        this.startWaveCountdown(false);
     }
 
     updateLiftWalk() {
@@ -968,6 +977,118 @@ export class GameManager {
         this.levelManager.setPodDoorOpen(true, this.activePodIsSector);
     }
 
+    beginLiftFromTerminal() {
+        if (!this.levelManager || this.gameState !== 'SHOPPING' || this.isResearchHubActive) return;
+
+        const isSectorPod = this.activePodIsSector;
+        EventBus.emit('TERMINAL_CLOSE', { isSectorPod });
+        EventBus.emit('TERMINAL_RESET');
+        this.gameState = 'PLAYING';
+        this.terminalSequence = 'idle';
+        this.terminalReady = false;
+        this.player.playerVelX = 0;
+        this.player.playerVelZ = 0;
+        this.liftPassengerLock = true;
+        this.liftPassengerPos = {
+            x: this.player.camera.position.x,
+            z: this.player.camera.position.z
+        };
+        this.liftExitPending = true;
+        this.liftExitIsSectorPod = isSectorPod;
+        this.liftExitFrom = null;
+        this.liftExitTo = null;
+        this.liftExitStage = 'opening';
+        this.liftExitTimer = 0;
+        this.liftLook = null;
+        if (isSectorPod) this.levelManager.setSectorPodActive(true);
+        this.levelManager.setPodDoorOpen(true, isSectorPod);
+        if (this.weaponSystem) this.weaponSystem.drawFromTerminal();
+        this.startWaveCountdown(!this.hasStartedAnyWave);
+    }
+
+    finishElevatorArrival() {
+        this.isElevating = false;
+        this.elevatorPhase = 'done';
+        this.liftExitPending = false;
+        this.liftExitStage = 'idle';
+        this.liftExitFrom = null;
+        this.liftExitTo = null;
+        this.liftExitTimer = 0;
+        this.liftPassengerLock = false;
+        this.liftPassengerPos = null;
+        if (this.pendingResearchArrival || this.pendingGateArrival) this._startResearchFloor();
+        else this._startWaveAction();
+    }
+
+    // A lift indulásakor a játékos körülnéz, megfordul az ajtó felé, és arccal előre sétál ki; az ajtótól 1 méterre áll meg
+    updateLiftExit(delta) {
+        if (!this.liftExitPending || !this.player || !this.player.camera) return;
+        const isSector = this.liftExitIsSectorPod;
+        const doorZ = 4.45 * (3.2 / 9.8);
+        const doorProgress = isSector ? this.levelManager.sectorPodDoorProgress : this.levelManager.podDoorProgress;
+        const input = this.player.inputManagerRef;
+        const ease = (t) => t * t * (3 - 2 * t);
+        const clamp01 = (t) => Math.min(1, Math.max(0, t));
+        this.liftExitTimer += delta;
+        const t = this.liftExitTimer;
+
+        if (this.liftExitStage === 'opening') {
+            if (!this.liftLook) {
+                const yaw = input ? input.yaw : 0;
+                const wrapped = Math.atan2(Math.sin(Math.PI - yaw), Math.cos(Math.PI - yaw));
+                this.liftLook = { yaw0: yaw, yawDelta: wrapped, pitch0: input ? input.pitch : 0 };
+            }
+            const turnDuration = 1.8;
+            const k = ease(clamp01(t / turnDuration));
+            if (input) {
+                // Körbenéz: előbb oldalra, majd vissza az ajtó felé fordul, közben a fej enyhén lebillen
+                const glance = Math.sin(clamp01(t / turnDuration) * Math.PI);
+                input.yaw = this.liftLook.yaw0 + this.liftLook.yawDelta * k + Math.sin(t * 2.6) * 0.1 * glance;
+                input.pitch = this.liftLook.pitch0 * (1 - k) + (-0.08 * glance) + Math.sin(t * 1.9) * 0.04 * glance;
+            }
+            if (t >= turnDuration && (doorProgress >= 0.98 || t >= 3.0)) {
+                const from = this.player.camera.position;
+                this.liftExitFrom = { x: from.x, y: from.y, z: from.z };
+                this.liftExitTo = { x: isSector ? -sectorHallCenter : 0, y: from.y, z: doorZ + 1 };
+                this.liftExitStage = 'walking';
+                this.liftExitTimer = 0;
+            }
+        } else if (this.liftExitStage === 'walking') {
+            const duration = 2.4;
+            const progress = clamp01(t / duration);
+            const eased = ease(progress);
+            const sway = Math.sin(progress * Math.PI * 4);
+            const envelope = Math.sin(progress * Math.PI);
+            this.player.camera.position.set(
+                this.liftExitFrom.x + (this.liftExitTo.x - this.liftExitFrom.x) * eased + sway * 0.03 * envelope,
+                this.liftExitFrom.y - Math.abs(sway) * 0.04 * envelope,
+                this.liftExitFrom.z + (this.liftExitTo.z - this.liftExitFrom.z) * eased
+            );
+            if (input) {
+                input.yaw = Math.PI + sway * 0.05 * envelope;
+                input.pitch = Math.sin(progress * Math.PI * 2) * 0.03;
+            }
+            this.player.playerVelX = 0;
+            this.player.playerVelZ = 0;
+            if (progress >= 1) {
+                this.liftPassengerPos = { x: this.liftExitTo.x, z: this.liftExitTo.z };
+                this.liftExitStage = 'closing';
+                this.liftExitTimer = 0;
+                this.levelManager.setPodDoorOpen(false, isSector);
+            }
+        } else if (this.liftExitStage === 'closing') {
+            if (input) {
+                input.yaw = Math.PI;
+                input.pitch = 0;
+            }
+            if (doorProgress <= 0.02 || t >= 1.2) {
+                this.liftExitStage = 'done';
+                this.liftExitPending = false;
+                this.liftLook = null;
+            }
+        }
+    }
+
     startTerminalMove(target, nextSequence) {
         const position = this.player.camera.position;
         this.terminalMoveFrom = { x: position.x, y: position.y, z: position.z };
@@ -979,7 +1100,7 @@ export class GameManager {
     startTerminalExitTurn() {
         const camera = this.player.camera;
         const podCenterX = this.activePodIsSector ? -sectorHallCenter : 0;
-        const exitDirection = new THREE.Vector3(podCenterX - camera.position.x, 0, 2.2 - camera.position.z);
+        const exitDirection = new THREE.Vector3(podCenterX - camera.position.x, 0, 5.6 - camera.position.z);
         if (exitDirection.lengthSq() === 0) exitDirection.set(0, 0, 1);
         exitDirection.normalize();
 
@@ -1048,7 +1169,7 @@ export class GameManager {
                 this.player.camera.quaternion.copy(this.terminalTurnTo);
                 const inputManager = this.player.inputManagerRef || (this.weaponSystem && this.weaponSystem.inputManagerRef);
                 if (inputManager) inputManager.yaw = this.terminalTurnYaw;
-                this.startTerminalMove({ x: this.activePodIsSector ? -sectorHallCenter : 0, y: 1.6, z: 2.2 }, 'exit-moving');
+                this.startTerminalMove({ x: this.activePodIsSector ? -sectorHallCenter : 0, y: 1.6, z: 5.6 }, 'exit-moving');
             }
         } else if (this.terminalSequence === 'exit-moving') {
             const progress = Math.min(1, this.terminalSequenceTime / 1.1);
@@ -1064,7 +1185,12 @@ export class GameManager {
                 this.levelManager.setPodDoorOpen(false, this.activePodIsSector);
                 if (this.weaponSystem) this.weaponSystem.drawFromTerminal();
             }
-        } else if (this.terminalSequence === 'exit-closing' && activePodDoorProgress <= 0.02) {
+        } else if (
+            this.terminalSequence === 'exit-closing' &&
+            activePodDoorProgress <= 0.02 &&
+            (!this.weaponSystem ||
+                (!this.weaponSystem.terminalWeaponTransition && !this.weaponSystem.isWeaponBusy))
+        ) {
             this.terminalSequence = 'idle';
             this.gameState = 'PLAYING';
             this.player.playerVelX = 0;
@@ -1106,8 +1232,10 @@ export class GameManager {
         if (this.isElevating) {
             this.elevatorTimer += delta;
 
-            // A kabinba beszállt játékos a lift útja alatt egy helyben áll
-            if (this.liftPassengerLock && this.player && this.player.camera) {
+            this.updateLiftExit(delta);
+
+            // A játékos a lift útja alatt egy helyben áll (kivezetés közben a kivezetés mozgatja)
+            if (this.liftPassengerLock && this.liftExitStage !== 'walking' && this.player && this.player.camera) {
                 const camPos = this.player.camera.position;
                 if (!this.liftPassengerPos) this.liftPassengerPos = { x: camPos.x, z: camPos.z };
                 camPos.x = this.liftPassengerPos.x;
@@ -1125,7 +1253,7 @@ export class GameManager {
                     EventBus.emit('STOP_ELEVATOR_MOVE');
                     EventBus.emit('CAMERA_DIP', { duration: this.currentWave === 102 ? 1.1 : 0.7 });
                     if (this.currentWave === 102) EventBus.emit('CAMERA_SHAKE', 0.9);
-                    this.liftPassengerLock = false;
+                    if (!this.liftExitPending) this.liftPassengerLock = false;
                     EventBus.emit('ELEVATOR_ARRIVED', { wave: this.currentWave });
                 }
             } 
@@ -1140,11 +1268,8 @@ export class GameManager {
             } 
             // 3. Fázis: Zsilipkapuk kitárultak -> a szint élesedik, ellenfelek beözönlenek
             else if (this.elevatorPhase === 'opening') {
-                if (this.elevatorTimer >= 15.5 + this.elevatorExtraTime) {
-                    this.isElevating = false;
-                    this.elevatorPhase = 'done';
-                    if (this.pendingResearchArrival || this.pendingGateArrival) this._startResearchFloor();
-                    else this._startWaveAction();
+                if (this.elevatorTimer >= 15.5 + this.elevatorExtraTime && !this.liftExitPending) {
+                    this.finishElevatorArrival();
                 }
             }
         }
