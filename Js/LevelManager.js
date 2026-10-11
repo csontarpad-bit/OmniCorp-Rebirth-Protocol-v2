@@ -116,8 +116,6 @@ class LevelManager {
                 this.caveWorldOffset = -sectorHallCenter;
                 if (!this.caveGroup) this.buildCave();
                 this.setCaveShell(true);
-                // Megérkezéskor azonnal kinyílik a kabin ajtaja, és kilátni a barlangra
-                this.cabinDoorTarget = 0;
             }
         });
         EventBus.on('WAVE_STARTING', (data) => {
@@ -1933,11 +1931,16 @@ class LevelManager {
             this.scene.add(group);
             if (this.caveTexturesRequested) this.applyCabinTextures();
         }
+        // Ha a kabin már ugyanott áll, az ajtó állapota megmarad (a beszállás után zárva marad a lift indulásakor)
+        const keepDoor = this.cabinGroup.visible && this.cabinCenter &&
+            this.cabinCenter.x === x && this.cabinCenter.z === z;
         this.cabinGroup.position.set(x, 0, z);
         this.cabinGroup.visible = true;
         this.cabinCenter = { x, z };
-        this.cabinDoorProgress = 0;
-        this.cabinDoorTarget = 0;
+        if (!keepDoor) {
+            this.cabinDoorProgress = 0;
+            this.cabinDoorTarget = 0;
+        }
         this.updateCabinDoorPose();
     }
 
@@ -2644,7 +2647,7 @@ class LevelManager {
     // --- ZSILIPKAPU NYITÁS ÉS ZÁRÁS VEZÉRLÉS ---
     openDoors(duration = 7.5) {
         if (this.cabinGroup && this.cabinGroup.visible) {
-            this.cabinDoorTarget = 0;
+            if (!this.holdCabinDoor) this.cabinDoorTarget = 0;
             if (!this.caveShellHidden && !this.finalPodRoomActive) this.hideSingleCabin();
         }
         // A 101. szinten a lift indulása elrejti a kabint, ezért a megérkezéskor újra meg kell jeleníteni
@@ -3048,10 +3051,12 @@ class LevelManager {
                 return true;
             }
         }
-        if (!this.isElevatorMoving && !this.caveShellHidden && this.liftPlatformHalf !== undefined) {
+        // A szerverfolyosót, a termet és a szektorarénát a saját ütközésdobozai határolják, ott a platformperem-szabály nem él
+        if (!this.isElevatorMoving && !this.caveShellHidden && !this.nodeSectionActive && this.liftPlatformHalf !== undefined) {
             const half = this.liftPlatformHalf;
-            const rampHalfWidth = 3.0;
-            const gateApproachDepth = 36.0;
+            // Az R&D szobák (26-42 m, 14 m széles) a zsilip alagút helyén állnak, ezért ott mélyebbre és szélesebben járható
+            const rampHalfWidth = this.isResearchHubVisible ? 6.6 : 3.0;
+            const gateApproachDepth = this.isResearchHubVisible ? 42.0 : 36.0;
             const alignedWithNorthSouthGate = this.liftGateCenters.some(center => Math.abs(x - center) <= rampHalfWidth);
             const alignedWithWestEastGate = this.liftGateCenters.some(center => Math.abs(z - center) <= rampHalfWidth);
             const nearNorthSouthRamp = Math.abs(Math.abs(z) - half) <= r + 0.4 && alignedWithNorthSouthGate;

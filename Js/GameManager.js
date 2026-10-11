@@ -18,6 +18,10 @@ export class GameManager {
         this.nodeState = 'none';
         this.finalLiftStarted = false;
         this.liftPassengerLock = false;
+        this.finalEntry = null;
+        this.caveExitPending = false;
+        this.caveExitStage = null;
+        if (this.levelManager) this.levelManager.holdCabinDoor = false;
         this.liftExitPending = false;
         this.liftExitIsSectorPod = false;
         this.liftExitFrom = null;
@@ -207,6 +211,10 @@ export class GameManager {
         this.isElevating = false;
         this.elevatorPhase = 'idle';
         this.liftPassengerLock = false;
+        this.finalEntry = null;
+        this.caveExitPending = false;
+        this.caveExitStage = null;
+        if (this.levelManager) this.levelManager.holdCabinDoor = false;
         this.liftExitPending = false;
         this.liftExitIsSectorPod = false;
         this.liftExitFrom = null;
@@ -374,6 +382,10 @@ export class GameManager {
         this.isElevating = false;
         this.elevatorPhase = 'idle';
         this.liftPassengerLock = false;
+        this.finalEntry = null;
+        this.caveExitPending = false;
+        this.caveExitStage = null;
+        if (this.levelManager) this.levelManager.holdCabinDoor = false;
         EventBus.emit('STOP_AUDIO', { id: 'elevatorMove' });
         EventBus.emit('STOP_AUDIO', { id: 'elevatorStop' });
         EventBus.emit('STOP_AUDIO', { id: 'gateOpen' });
@@ -875,7 +887,7 @@ export class GameManager {
         }
     }
 
-    // A lift az indítógomb megnyomásakor azonnal elindul; a játékos marad a jelenlegi kabinpozícióban.
+    // A barlangi Maglift: a játékos besétál a kabinba, körülnéz, megfordul az ajtó felé, az ajtó bezáródik, és csak ezután indul a lift
     beginFinalLiftEntry() {
         if (!this.levelManager || this.terminalSequence !== 'idle') return;
         this.finalLiftStarted = true;
@@ -883,11 +895,154 @@ export class GameManager {
         this.terminalSequence = 'idle';
         this.player.playerVelX = 0;
         this.player.playerVelZ = 0;
-        const position = this.player.camera.position;
-        this.liftPassengerLock = true;
-        this.liftPassengerPos = { x: position.x, z: position.z };
-        EventBus.emit('MAGLIFT_DEPARTING');
-        this.startWaveCountdown(false);
+        const input = this.player.inputManagerRef;
+        const from = this.player.camera.position;
+        const to = { x: -sectorHallCenter, z: 0 };
+        const distance = Math.hypot(to.x - from.x, to.z - from.z);
+        this.caveExitPending = true;
+        this.caveExitStage = null;
+        this.levelManager.holdCabinDoor = true;
+        this.finalEntry = {
+            stage: 'walk',
+            time: 0,
+            from: { x: from.x, y: from.y, z: from.z },
+            to,
+            duration: Math.min(3, Math.max(1.4, distance * 0.9 + 0.6)),
+            yaw0: input ? input.yaw : 0,
+            pitch0: input ? input.pitch : 0,
+            yawWalk: 0
+        };
+        this.finalEntry.yawWalk = this.finalEntry.yaw0 + this.wrapAngle(
+            Math.atan2(-(to.x - from.x), -(to.z - from.z)) - this.finalEntry.yaw0
+        );
+        this.liftPassengerLock = false;
+        this.liftPassengerPos = null;
+    }
+
+    wrapAngle(angle) {
+        return Math.atan2(Math.sin(angle), Math.cos(angle));
+    }
+
+    updateFinalLiftEntry(delta) {
+        const entry = this.finalEntry;
+        if (!entry || !this.player || !this.player.camera) return false;
+        const input = this.player.inputManagerRef;
+        const camera = this.player.camera;
+        const ease = (t) => t * t * (3 - 2 * t);
+        const clamp01 = (t) => Math.min(1, Math.max(0, t));
+        entry.time += delta;
+        this.player.playerVelX = 0;
+        this.player.playerVelZ = 0;
+
+        if (entry.stage === 'walk') {
+            const progress = clamp01(entry.time / entry.duration);
+            const eased = ease(progress);
+            const sway = Math.sin(progress * Math.PI * (entry.duration * 1.6));
+            const envelope = Math.sin(progress * Math.PI);
+            camera.position.set(
+                entry.from.x + (entry.to.x - entry.from.x) * eased + sway * 0.03 * envelope,
+                entry.from.y - Math.abs(sway) * 0.04 * envelope,
+                entry.from.z + (entry.to.z - entry.from.z) * eased
+            );
+            if (input) {
+                const aim = ease(clamp01(progress / 0.4));
+                const glance = Math.sin(progress * Math.PI * 2) * envelope;
+                input.yaw = entry.yaw0 + (entry.yawWalk - entry.yaw0) * aim + glance * 0.35;
+                input.pitch = entry.pitch0 * (1 - aim) - 0.06 * envelope + Math.sin(progress * Math.PI * 2.5) * 0.03;
+            }
+            if (progress >= 1) {
+                entry.stage = 'turn';
+                entry.time = 0;
+                entry.yawStart = input ? input.yaw : entry.yawWalk;
+            }
+        } else if (entry.stage === 'turn') {
+            const duration = 1.3;
+            const progress = clamp01(entry.time / duration);
+            const eased = ease(progress);
+            const envelope = Math.sin(progress * Math.PI);
+            if (input) {
+                // Megfordul a kabinban az ajtó (+X) felé, közben kicsit körbenéz
+                const targetYaw = entry.yawStart + this.wrapAngle(-Math.PI / 2 - entry.yawStart);
+                input.yaw = entry.yawStart + (targetYaw - entry.yawStart) * eased + Math.sin(progress * Math.PI * 3) * 0.06 * envelope;
+                input.pitch = -0.07 * envelope + Math.sin(progress * Math.PI * 2) * 0.03;
+            }
+            // Az ajtó még a megfordulás vége felé elkezd záródni, így nincs holtidő a lift indulása előtt
+            if (progress >= 0.6) this.levelManager.cabinDoorTarget = 1;
+            if (progress >= 1) {
+                if (input) { input.yaw = this.wrapAngle(-Math.PI / 2); input.pitch = 0; }
+                this.finalEntry = null;
+                this.liftPassengerLock = true;
+                this.liftPassengerPos = { x: camera.position.x, z: camera.position.z };
+                EventBus.emit('MAGLIFT_DEPARTING');
+                this.startWaveCountdown(false);
+            }
+        }
+        return true;
+    }
+
+    // Megérkezéskor kinyílik a kabin ajtaja, a játékos kisétál, és az ajtótól 1 méterre megáll
+    updateCaveExit(delta) {
+        if (!this.caveExitStage || !this.player || !this.player.camera) return;
+        const input = this.player.inputManagerRef;
+        const camera = this.player.camera;
+        const ease = (t) => t * t * (3 - 2 * t);
+        const clamp01 = (t) => Math.min(1, Math.max(0, t));
+        this.caveExitTimer += delta;
+        const t = this.caveExitTimer;
+        this.player.playerVelX = 0;
+        this.player.playerVelZ = 0;
+
+        if (this.caveExitStage === 'wait') {
+            // A leállás (fékezés + hangeffekt) pillanatában csapódik a fej lefelé
+            if (this.elevatorTimer >= 6.5 + this.elevatorExtraTime) {
+                this.caveExitStage = 'land';
+                this.caveExitTimer = 0;
+                this.caveLandPitch0 = input ? input.pitch : 0;
+                EventBus.emit('CAMERA_SHAKE', 0.9);
+            }
+        } else if (this.caveExitStage === 'land') {
+            // Durva érkezés: a fej lecsapódik a padló felé, egy ideig ott marad, majd lassan feltekint
+            const down = ease(clamp01(t / 0.15));
+            const up = ease(clamp01((t - 1.1) / 1.2));
+            if (input) input.pitch = this.caveLandPitch0 + (-1.3 - this.caveLandPitch0) * down * (1 - up) +
+                Math.sin(t * 22) * 0.025 * (1 - clamp01(t / 0.9)) * down;
+            if (t >= 2.3) {
+                if (input) input.pitch = 0;
+                this.caveExitStage = 'door';
+                this.caveExitTimer = 0;
+                this.levelManager.cabinDoorTarget = 0;
+            }
+        } else if (this.caveExitStage === 'door') {
+            if (this.levelManager.cabinDoorProgress <= 0.05 || t >= 1.8) {
+                this.caveExitStage = 'walking';
+                this.caveExitTimer = 0;
+                this.caveExitFrom = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+                this.caveExitTo = { x: -sectorHallCenter + 1.25 + 1.0, z: 0 };
+            }
+        } else if (this.caveExitStage === 'walking') {
+            const duration = 2.6;
+            const progress = clamp01(t / duration);
+            const eased = ease(progress);
+            const sway = Math.sin(progress * Math.PI * 4);
+            const envelope = Math.sin(progress * Math.PI);
+            camera.position.set(
+                this.caveExitFrom.x + (this.caveExitTo.x - this.caveExitFrom.x) * eased,
+                this.caveExitFrom.y - Math.abs(sway) * 0.04 * envelope,
+                this.caveExitFrom.z + (this.caveExitTo.z - this.caveExitFrom.z) * eased + sway * 0.03 * envelope
+            );
+            if (input) {
+                input.yaw = -Math.PI / 2 + Math.sin(progress * Math.PI * 2) * 0.4 * envelope;
+                input.pitch = Math.sin(progress * Math.PI * 3) * 0.04 * envelope;
+            }
+            if (progress >= 1) {
+                if (input) { input.yaw = -Math.PI / 2; input.pitch = 0; }
+                this.caveExitStage = null;
+                if (this.levelManager) this.levelManager.holdCabinDoor = false;
+                this.caveExitPending = false;
+                this.liftPassengerLock = false;
+                this.liftPassengerPos = null;
+            }
+        }
     }
 
     updateLiftWalk() {
@@ -1015,6 +1170,9 @@ export class GameManager {
         this.liftExitFrom = null;
         this.liftExitTo = null;
         this.liftExitTimer = 0;
+        this.caveExitPending = false;
+        this.caveExitStage = null;
+        if (this.levelManager) this.levelManager.holdCabinDoor = false;
         this.liftPassengerLock = false;
         this.liftPassengerPos = null;
         if (this.pendingResearchArrival || this.pendingGateArrival) this._startResearchFloor();
@@ -1243,6 +1401,8 @@ export class GameManager {
         }
         if (this.gameState !== 'PLAYING') return;
 
+        if (this.updateFinalLiftEntry(delta)) return;
+
         this.updateTerminalProximity();
         this.updateNodeSection();
         this.updateResearchHubProximity();
@@ -1252,9 +1412,10 @@ export class GameManager {
             this.elevatorTimer += delta;
 
             this.updateLiftExit(delta);
+            this.updateCaveExit(delta);
 
             // A játékos a lift útja alatt egy helyben áll (kivezetés közben a kivezetés mozgatja)
-            if (this.liftPassengerLock && this.liftExitStage !== 'walking' && this.player && this.player.camera) {
+            if (this.liftPassengerLock && this.liftExitStage !== 'walking' && this.caveExitStage !== 'walking' && this.player && this.player.camera) {
                 const camPos = this.player.camera.position;
                 if (!this.liftPassengerPos) this.liftPassengerPos = { x: camPos.x, z: camPos.z };
                 camPos.x = this.liftPassengerPos.x;
@@ -1272,7 +1433,12 @@ export class GameManager {
                     EventBus.emit('STOP_ELEVATOR_MOVE');
                     EventBus.emit('CAMERA_DIP', { duration: this.currentWave === 102 ? 1.1 : 0.7 });
                     if (this.currentWave === 102) EventBus.emit('CAMERA_SHAKE', 0.9);
-                    if (!this.liftExitPending) this.liftPassengerLock = false;
+                    if (this.caveExitPending) {
+                        this.caveExitStage = 'wait';
+                        this.caveExitTimer = 0;
+                    } else if (!this.liftExitPending) {
+                        this.liftPassengerLock = false;
+                    }
                     EventBus.emit('ELEVATOR_ARRIVED', { wave: this.currentWave });
                 }
             } 
